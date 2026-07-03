@@ -8,7 +8,7 @@ key, and no model download required** to get started.
 > incoherent long conversations, and black-box "memory" you can't inspect.
 > NoMem gives you a hard token budget and a full audit trail of every decision.
 
-**Status:** `v0.1` — Milestone 1 (core engine). See the [roadmap](#roadmap).
+**Status:** `v0.1` — Milestones 1–2 (core engine + archival retrieval). See the [roadmap](#roadmap).
 
 ## Why NoMem
 
@@ -86,6 +86,24 @@ python examples/basic_usage.py
 Everything lives in one local SQLite file (or `:memory:`). Archival retrieval
 uses SQLite's built-in **FTS5** keyword search — no embedding model needed.
 
+### Retrieval
+
+Pass a `query` to `build_context(query=...)` and NoMem pulls older, relevant
+messages back into context — even ones the sliding window already dropped:
+
+```python
+mem.add_user("Important: I'm severely allergic to peanuts.")
+# ... many turns later, the allergy has slid out of the window ...
+result = mem.build_context(query="what snacks are safe given my peanut allergy?")
+# -> the allergy fact is retrieved and re-inserted, and the log shows why
+```
+
+Two knobs (sensible defaults): `retrieval_top_k` (how many matches to consider,
+default 5) and `archival_ratio` (fraction of the budget reserved for retrieved
+memories, default `0.3`; unused reservation rolls over to recent conversation).
+Retrieval is keyword-based in v0.1 — semantic/vector retrieval is a later
+upgrade behind the same interface. See `examples/retrieval_demo.py`.
+
 ## Design choices
 
 - **Pluggable token counting.** `TokenCounter` interface with `OpenAICounter`
@@ -102,8 +120,9 @@ uses SQLite's built-in **FTS5** keyword search — no embedding model needed.
 
 - **M1 — Core engine** ✅ Token-budgeted working memory, SQLite persistence,
   user/session scoping, full transparency log.
-- **M2 — Archival retrieval** FTS5 keyword search wired into `build_context`;
-  relevant past messages pulled in when the budget allows, trade-offs logged.
+- **M2 — Archival retrieval** ✅ FTS5 keyword search wired into `build_context`;
+  relevant past messages pulled back in when the budget allows, every retrieval
+  trade-off logged.
 - **M3 — Rule-based compaction** Extractive summariser + facts extraction into
   the core tier; rolling summaries in working memory.
 - **M4 — Adapters & polish** LangChain `BaseMemory` adapter, tool-output

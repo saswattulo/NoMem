@@ -5,12 +5,23 @@ from nomem.tokens import TokenCounter
 
 
 class CharCounter(TokenCounter):
-    """Deterministic 1-char-per-token counter for exact budget assertions."""
+    """Deterministic 1-char-per-token counter for exact budget assertions.
 
-    per_message_overhead = 0
+    ``per_message_overhead`` of 1 accounts for the newline that joins rendered
+    messages, so ``len(text) <= tokens_used`` holds (mirrors why the real
+    counters carry an overhead).
+    """
+
+    per_message_overhead = 1
 
     def count(self, text: str) -> int:
         return len(text)
+
+
+def _fts_available() -> bool:
+    from nomem.store import SQLiteStore
+
+    return SQLiteStore(":memory:").fts_enabled
 
 
 def make(max_tokens=100, core="", **kw) -> NoMem:
@@ -126,3 +137,52 @@ def test_fts_archival_search_groundwork():
     store.add_message("u", "s", "user", "The weather is nice today")
     hits = store.search("u", "s", "tokyo trip", k=5)
     assert any("Tokyo" in h.content for h in hits)
+
+
+# -- M2: archival retrieval ---------------------------------------------------
+
+
+def test_retrieval_recalls_a_message_dropped_from_the_window():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=300)
+    mem.add_user("chartreuse is my favorite color")
+    for i in range(40):
+        mem.add_user(f"unrelated filler message number {i:02d}")
+
+    # Without a query the early fact is pushed out of the recent window.
+    assert "chartreuse" not in mem.build_context().text
+
+    # A matching query pulls it back in via the archival tier.
+    result = mem.build_context(query="what is my favorite color chartreuse")
+    assert "chartreuse" in result.text
+    assert result.tokens_used <= result.max_tokens
+    assert any(e.action == "retrieved" and e.tier == "archival" for e in result.log)
+
+
+def test_retrieval_stays_within_budget():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=150)
+    for i in range(60):
+        mem.add_user(f"tokyo trip planning note number {i}")
+    result = mem.build_context(query="tokyo trip planning")
+    assert result.tokens_used <= 150
+    assert len(result.text) <= 150
+
+
+def test_retrieval_does_not_duplicate_a_recent_message():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=1000)  # everything fits in the window
+    mem.add_user("pangolins are my favorite animal")
+    mem.add_assistant("noted")
+    result = mem.build_context(query="pangolins favorite animal")
+    assert result.text.count("pangolins are my favorite animal") == 1
+
+
+def test_no_query_means_no_archival_work():
+    mem = make(max_tokens=1000)
+    mem.add_user("hello world")
+    result = mem.build_context()
+    assert not any(e.tier == "archival" for e in result.log)

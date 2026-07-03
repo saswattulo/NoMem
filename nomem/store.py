@@ -65,9 +65,27 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 """
 
 
+# A small English stop-word set so keyword retrieval matches on meaningful
+# terms, not filler like "what" or "my". Kept intentionally short.
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do", "does",
+    "for", "from", "get", "give", "had", "has", "have", "he", "her", "him", "his",
+    "how", "i", "if", "in", "into", "is", "it", "its", "just", "me", "my", "of",
+    "on", "or", "our", "she", "so", "that", "the", "their", "them", "then",
+    "there", "they", "this", "to", "up", "us", "was", "we", "were", "what",
+    "when", "where", "which", "who", "why", "will", "with", "you", "your",
+}
+
+
 def _fts_query(text: str) -> Optional[str]:
-    """Turn arbitrary user text into a safe FTS5 MATCH expression."""
+    """Turn arbitrary user text into a safe FTS5 MATCH expression.
+
+    Stop words are dropped so retrieval keys on meaningful terms; if a query is
+    *only* stop words we fall back to using them so it still returns something.
+    """
     terms = re.findall(r"\w+", text.lower())
+    meaningful = [t for t in terms if t not in _STOPWORDS]
+    terms = meaningful or terms
     if not terms:
         return None
     return " OR ".join(f'"{t}"' for t in terms)
