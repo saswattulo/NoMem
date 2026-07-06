@@ -35,7 +35,7 @@ class LogEntry:
     produces one of these.
     """
 
-    action: str  # "core" | "added" | "dropped" | "budget_exhausted" | "retrieved" | "summarized"
+    action: str  # "core" | "added" | "dropped" | "budget_exhausted" | "retrieved" | "retrieval" | "skipped" | "summarized"
     tier: str  # "core" | "working" | "archival"
     detail: str
     tokens: int = 0

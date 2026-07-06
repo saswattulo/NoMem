@@ -57,23 +57,28 @@ print(result.tokens_used) # exact
 print(result.explain())   # the full transparency log
 ```
 
-`result.explain()` prints exactly what happened and why:
+`result.explain()` prints exactly what happened and why. Here's the trace from
+the fuller demo (`python examples/basic_usage.py`), where the budget forces
+drops and retrieval pulls an already-dropped fact back in:
 
 ```
-context: 118/120 tokens, 3 messages
-------------------------------------
-core             core         38t [82 left]  included fixed core memory
-added            working      41t [41 left]  user message #3
-added            working      39t  [2 left]  assistant message #2
-dropped          working      52t  [2 left]  user message #1 (needs 52, 2 left)
-budget_exhausted working       0t  [2 left]  1 older message(s) dropped to fit the budget
+context: 98/120 tokens, 5 messages
+----------------------------------
+core             core         15t [105 left]  included fixed core memory
+retrieved        archival     27t [4 left]  user message #3 (relevance match)
+skipped          archival      0t [4 left]  user message #5 (already in the recent window)
+skipped          archival      0t [4 left]  user message #7 (already in the recent window)
+retrieval        archival     27t [4 left]  retrieved 1 of 3 match(es) for query
+added            working      16t [62 left]  user message #7
+added            working      22t [40 left]  assistant message #6
+added            working      18t [22 left]  user message #5
+dropped          working      24t [22 left]  assistant message #4 (needs 24, 22 left)
+dropped          working      17t [22 left]  assistant message #2 (needs 17, 22 left)
+dropped          working      14t [22 left]  user message #1 (needs 14, 22 left)
+budget_exhausted working       0t [22 left]  3 older message(s) dropped to fit the budget
 ```
 
-Run the full demo:
-
-```bash
-python examples/basic_usage.py
-```
+(Exact token numbers depend on the `TokenCounter` in use.)
 
 ## The three tiers
 
@@ -101,6 +106,8 @@ result = mem.build_context(query="what snacks are safe given my peanut allergy?"
 Two knobs (sensible defaults): `retrieval_top_k` (how many matches to consider,
 default 5) and `archival_ratio` (fraction of the budget reserved for retrieved
 memories, default `0.3`; unused reservation rolls over to recent conversation).
+Messages still inside the recent window are never duplicated or relocated into
+the retrieved block — the log shows them as `skipped`.
 Retrieval is keyword-based in v0.1 — semantic/vector retrieval is a later
 upgrade behind the same interface. See `examples/retrieval_demo.py`.
 

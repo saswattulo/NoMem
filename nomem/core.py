@@ -55,6 +55,12 @@ class NoMem:
         retrieval_top_k: int = 5,
         archival_ratio: float = 0.3,
     ):
+        if max_tokens < 1:
+            raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
+        if not 0.0 <= archival_ratio <= 1.0:
+            raise ValueError(f"archival_ratio must be within [0.0, 1.0], got {archival_ratio}")
+        if retrieval_top_k < 0:
+            raise ValueError(f"retrieval_top_k must be >= 0, got {retrieval_top_k}")
         self.max_tokens = max_tokens
         self.core = core
         self.user_id = user_id
@@ -62,6 +68,7 @@ class NoMem:
         self.counter = counter or default_counter()
         self.retrieval_top_k = retrieval_top_k
         self.archival_ratio = archival_ratio
+        self._owns_store = not isinstance(db, SQLiteStore)
         self.store = db if isinstance(db, SQLiteStore) else SQLiteStore(db)
         self._log: list[LogEntry] = []
 
@@ -116,7 +123,11 @@ class NoMem:
         if query and self.retrieval_top_k > 0 and self.archival_ratio > 0 and budget > 0:
             cap = int(budget * self.archival_ratio)
             if cap > 0:
-                retrieved, retrieved_ids, r_used = self._retrieve(query, cap, log)
+                # Retrieval is for what the window has lost: anything that will
+                # already appear as a recent turn must stay a recent turn, not
+                # get relocated into the retrieved block.
+                window_ids = {m.id for m in self._fill_working(budget - cap, set(), [])}
+                retrieved, retrieved_ids, r_used = self._retrieve(query, cap, window_ids, log)
                 used += r_used
                 budget -= r_used
         if retrieved:
@@ -141,12 +152,20 @@ class NoMem:
 
     # -- assembly helpers ------------------------------------------------
 
-    def _retrieve(self, query: str, cap: int, log: list[LogEntry]):
+    def _retrieve(self, query: str, cap: int, exclude: set[int], log: list[LogEntry]):
         """Greedily fill up to ``cap`` tokens with the best archival matches."""
+        if not getattr(self.store, "fts_enabled", True):
+            log.append(LogEntry("skipped", "archival",
+                "retrieval unavailable (SQLite built without FTS5)", 0, cap))
+            return [], set(), 0
         candidates = self.store.search(self.user_id, self.session_id, query, self.retrieval_top_k)
         included: list[Message] = []
         used = 0
         for m in candidates:
+            if m.id in exclude:
+                log.append(LogEntry("skipped", "archival",
+                    f"{m.role} message #{m.id} (already in the recent window)", 0, cap - used, m.id))
+                continue
             cost = self.counter.count_message("system", self._retrieved_block(included + [m])["content"])
             if cost <= cap:
                 log.append(LogEntry("retrieved", "archival",
@@ -203,4 +222,10 @@ class NoMem:
         return self.store.count_messages(self.user_id, self.session_id)
 
     def close(self) -> None:
-        self.store.close()
+        """Close the store if this instance created it.
+
+        A ``SQLiteStore`` passed in via ``db`` may be shared with other
+        instances, so its lifetime stays with whoever constructed it.
+        """
+        if self._owns_store:
+            self.store.close()

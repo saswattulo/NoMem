@@ -186,3 +186,63 @@ def test_no_query_means_no_archival_work():
     mem.add_user("hello world")
     result = mem.build_context()
     assert not any(e.tier == "archival" for e in result.log)
+
+
+def test_invalid_config_raises():
+    with pytest.raises(ValueError):
+        make(max_tokens=0)
+    with pytest.raises(ValueError):
+        make(archival_ratio=1.5)
+    with pytest.raises(ValueError):
+        make(archival_ratio=-0.1)
+    with pytest.raises(ValueError):
+        make(retrieval_top_k=-1)
+
+
+def test_budget_holds_at_full_archival_ratio():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=120, archival_ratio=1.0)
+    for i in range(30):
+        mem.add_user(f"tokyo trip note number {i}")
+    result = mem.build_context(query="tokyo trip note")
+    assert result.tokens_used <= 120
+    assert len(result.text) <= 120
+
+
+def test_recent_message_stays_a_conversation_turn():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=1000)  # everything fits in the window
+    mem.add_user("pangolins are my favorite animal")
+    mem.add_assistant("noted")
+    result = mem.build_context(query="pangolins favorite animal")
+    # The recent message is presented as a normal conversational turn...
+    assert {"role": "user", "content": "pangolins are my favorite animal"} in result.messages
+    # ...not relocated into a retrieved-context system block.
+    assert not any(
+        m["role"] == "system" and "pangolins" in m["content"] for m in result.messages
+    )
+
+
+def test_retrieval_skip_is_logged_when_fts_unavailable():
+    mem = make(max_tokens=200)
+    mem.add_user("tokyo trip")
+    mem.store.fts_enabled = False  # simulate a SQLite build without FTS5
+    result = mem.build_context(query="tokyo")
+    assert any(
+        e.action == "skipped" and e.tier == "archival" and "FTS5" in e.detail
+        for e in result.log
+    )
+
+
+def test_close_leaves_a_shared_store_open():
+    from nomem.store import SQLiteStore
+
+    store = SQLiteStore(":memory:")
+    alice = make(db=store, user_id="alice")
+    bob = make(db=store, user_id="bob")
+    bob.add_user("still here")
+    alice.close()  # must not close the store out from under bob
+    assert "still here" in bob.build_context().text
+    store.close()
