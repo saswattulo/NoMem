@@ -30,8 +30,8 @@ langchain = ["langchain-core>=0.1"]
 dev = ["pytest>=7"]
 
 [project.urls]
-Homepage = "https://github.com/saswat/nomem"
-Repository = "https://github.com/saswat/nomem"
+Homepage = "https://github.com/saswattulo/NoMem"
+Repository = "https://github.com/saswattulo/NoMem"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nomem"]

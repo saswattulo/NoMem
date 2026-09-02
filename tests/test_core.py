@@ -246,3 +246,101 @@ def test_close_leaves_a_shared_store_open():
     alice.close()  # must not close the store out from under bob
     assert "still here" in bob.build_context().text
     store.close()
+
+
+# -- retrieval / recent-window interaction ------------------------------------
+
+
+_CONVO = [
+    ("user", "I want to refactor the billing module before the release."),
+    ("assistant", "Sounds good. What is the current pain point there?"),
+    ("user", "The invoice generator is coupled to the PDF renderer."),
+    ("assistant", "Decoupling those would help. Any deadline?"),
+    ("user", "Ship it by Friday. Also the staging DB keeps timing out."),
+    ("assistant", "Timeouts often come from connection pool exhaustion."),
+    ("user", "Right, let us park that and talk about the release notes."),
+    ("assistant", "Happy to help draft them. What changed this cycle?"),
+    ("user", "Mostly bug fixes and the new export button."),
+    ("assistant", "I will summarise those into three bullets."),
+]
+_QUERY = "what is coupled to the PDF renderer"
+
+
+def _kept_turn_numbers(result) -> list[int]:
+    """1-based positions of ``_CONVO`` turns rendered as conversation turns."""
+    turns = [m["content"] for m in result.messages if m["role"] != "system"]
+    return [i for i, (_, text) in enumerate(_CONVO, start=1) if text in turns]
+
+
+def test_retrieval_never_leaves_a_hole_in_the_recent_window():
+    """A retrieved message must not be one the window would have shown anyway.
+
+    Retrieval reserves a slice of the budget but usually underspends it, and
+    the rollover grows the recent window past whatever was assumed when
+    candidates were filtered. If those two disagree, a message gets quoted in
+    the retrieved block *and* skipped as a turn — leaving a gap mid-transcript
+    with the missing turn hoisted out of order above it.
+    """
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    for budget in range(60, 720, 5):
+        mem = make(max_tokens=budget)
+        for role, text in _CONVO:
+            mem.add(role, text)
+        result = mem.build_context(query=_QUERY)
+        kept = _kept_turn_numbers(result)
+        if kept:
+            assert kept == list(range(kept[0], kept[-1] + 1)), (
+                f"non-contiguous window at max_tokens={budget}: {kept}"
+            )
+        assert result.tokens_used <= budget
+        assert len(result.text) <= budget
+
+
+def test_retrieval_stands_down_when_the_match_still_fits_in_the_window():
+    """If the window can hold the match, it stays a turn and isn't retrieved."""
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=1000)  # comfortably fits the whole conversation
+    for role, text in _CONVO:
+        mem.add(role, text)
+    result = mem.build_context(query=_QUERY)
+    assert _kept_turn_numbers(result) == list(range(1, len(_CONVO) + 1))
+    assert not any(
+        m["role"] == "system" and "Relevant earlier context" in m["content"]
+        for m in result.messages
+    )
+
+
+def test_retrieval_still_fires_for_a_message_outside_the_window():
+    """Standing down must not mean never retrieving — the M2 promise holds."""
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=300)
+    mem.add_user("chartreuse is my favorite color")
+    for i in range(40):
+        mem.add_user(f"unrelated filler message number {i:02d}")
+    result = mem.build_context(query="what is my favorite color chartreuse")
+    assert any(
+        m["role"] == "system" and "chartreuse" in m["content"] for m in result.messages
+    )
+    assert result.tokens_used <= result.max_tokens
+
+
+def test_build_context_reads_the_message_list_once(monkeypatch):
+    """Settling retrieval must stay in memory, not re-scan the store."""
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=200)
+    for i in range(30):
+        mem.add_user(f"tokyo trip planning note number {i:02d}")
+
+    calls = []
+    original = mem.store.recent_messages
+    monkeypatch.setattr(
+        mem.store,
+        "recent_messages",
+        lambda *a, **k: (calls.append(1), original(*a, **k))[1],
+    )
+    mem.build_context(query="tokyo trip planning")
+    assert len(calls) == 1

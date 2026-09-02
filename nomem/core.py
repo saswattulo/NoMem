@@ -116,6 +116,10 @@ class NoMem:
             else:
                 log.append(LogEntry("core", "core", "included fixed core memory", core_tokens, budget))
 
+        # One read of the session's messages serves both the retrieval
+        # exclusion probe and the final window fill.
+        recent = self.store.recent_messages(self.user_id, self.session_id)
+
         # 2. Archival retrieval — pull older, relevant messages back into
         #    context, up to a reserved slice of the remaining budget.
         retrieved: list[Message] = []
@@ -123,19 +127,17 @@ class NoMem:
         if query and self.retrieval_top_k > 0 and self.archival_ratio > 0 and budget > 0:
             cap = int(budget * self.archival_ratio)
             if cap > 0:
-                # Retrieval is for what the window has lost: anything that will
-                # already appear as a recent turn must stay a recent turn, not
-                # get relocated into the retrieved block.
-                window_ids = {m.id for m in self._fill_working(budget - cap, set(), [])}
-                retrieved, retrieved_ids, r_used = self._retrieve(query, cap, window_ids, log)
+                retrieved, retrieved_ids, r_used, r_reserved = self._resolve_archival(
+                    query, recent, budget, cap, log
+                )
                 used += r_used
-                budget -= r_used
+                budget -= r_reserved
         if retrieved:
             messages.append(self._retrieved_block(retrieved))
 
         # 3. Working memory — recent messages fill the remaining budget,
         #    newest first, skipping anything retrieval already surfaced.
-        kept = self._fill_working(budget, retrieved_ids, log)
+        kept = self._fill_working(recent, budget, retrieved_ids, log)
         for m in kept:
             used += m.tokens if m.tokens is not None else self.counter.count_message(m.role, m.content)
         messages.extend(m.as_dict() for m in kept)
@@ -152,13 +154,66 @@ class NoMem:
 
     # -- assembly helpers ------------------------------------------------
 
-    def _retrieve(self, query: str, cap: int, exclude: set[int], log: list[LogEntry]):
-        """Greedily fill up to ``cap`` tokens with the best archival matches."""
+    def _resolve_archival(
+        self,
+        query: str,
+        recent: list[Message],
+        budget: int,
+        cap: int,
+        log: list[LogEntry],
+    ):
+        """Settle retrieval against the recent window it shares a budget with.
+
+        The two are mutually dependent: what retrieval spends shrinks the
+        window, and whatever the window will already show must not be pulled
+        into the retrieved block as well. So assume retrieval spends its whole
+        reservation (giving the smallest window), then recompute with what it
+        actually spent, until the two agree.
+
+        Settling matters. If the window used to exclude candidates is smaller
+        than the one finally rendered, a message can be retrieved *and* still
+        fit as a recent turn — which leaves a hole in the middle of the
+        conversation and quotes the missing turn out of order above it.
+
+        Returns the retrieved messages, their ids, the tokens they actually
+        cost, and the reservation to charge the window (equal, once settled).
+        """
         if not getattr(self.store, "fts_enabled", True):
             log.append(LogEntry("skipped", "archival",
                 "retrieval unavailable (SQLite built without FTS5)", 0, cap))
-            return [], set(), 0
-        candidates = self.store.search(self.user_id, self.session_id, query, self.retrieval_top_k)
+            return [], set(), 0, 0
+
+        candidates = self.store.search(
+            self.user_id, self.session_id, query, self.retrieval_top_k
+        )
+
+        spend = cap
+        for _ in range(self.retrieval_top_k + 2):
+            window = self._window_ids(recent, budget - spend)
+            settled = self._retrieve(candidates, cap, window, [])[2]
+            if settled == spend:
+                break
+            spend = settled
+        else:
+            # Didn't settle: passing over a bulky match can let two smaller
+            # ones in, so the spend can oscillate rather than converge. Fall
+            # back to reserving the whole slice — the window then cannot
+            # outgrow the exclusion set, at the cost of any unused rollover.
+            spend = cap
+
+        # Replay the settled pass, this time onto the real log.
+        window = self._window_ids(recent, budget - spend)
+        retrieved, ids, used = self._retrieve(candidates, cap, window, log)
+        return retrieved, ids, used, spend
+
+    def _retrieve(
+        self,
+        candidates: list[Message],
+        cap: int,
+        exclude: set[int],
+        log: list[LogEntry],
+    ):
+        """Greedily fill up to ``cap`` tokens with the best archival matches."""
         included: list[Message] = []
         used = 0
         for m in candidates:
@@ -179,11 +234,41 @@ class NoMem:
             f"retrieved {len(included)} of {len(candidates)} match(es) for query", used, cap - used))
         return included, {m.id for m in included}, used
 
-    def _fill_working(self, budget: int, skip_ids: set[int], log: list[LogEntry]) -> list[Message]:
-        """Keep the most recent messages that fit; log the rest."""
+    def _window_ids(self, recent: list[Message], budget: int) -> set[int]:
+        """Ids the recent window would hold at ``budget``.
+
+        The same greedy walk as :meth:`_fill_working`, stopping at the first
+        message that doesn't fit rather than logging every one behind it —
+        this runs once per settling pass, so it stays off the long tail.
+        """
+        ids: set[int] = set()
+        for m in recent:
+            mt = m.tokens if m.tokens is not None else self.counter.count_message(m.role, m.content)
+            if mt > budget:
+                break
+            ids.add(m.id)
+            budget -= mt
+        return ids
+
+    def _fill_working(
+        self,
+        recent: list[Message],
+        budget: int,
+        skip_ids: set[int],
+        log: list[LogEntry],
+    ) -> list[Message]:
+        """Keep the most recent messages that fit; log the rest.
+
+        The window is a contiguous run of newest turns: once one message
+        doesn't fit, every older one is dropped too, rather than cherry-picking
+        small old messages out of the middle of the conversation. ``skip_ids``
+        cannot punch a hole in it — :meth:`_resolve_archival` only ever
+        retrieves messages that fall outside this window, so by the time the
+        walk reaches one it is already past the boundary and keeping nothing.
+        """
         kept: list[Message] = []
         dropped = 0
-        for m in self.store.recent_messages(self.user_id, self.session_id):
+        for m in recent:
             if m.id in skip_ids:
                 continue  # already surfaced by retrieval
             mt = m.tokens if m.tokens is not None else self.counter.count_message(m.role, m.content)
