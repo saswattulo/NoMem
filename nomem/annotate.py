@@ -269,7 +269,16 @@ def _clean_value(v: str) -> str:
 def speaker_of(text: str) -> Optional[str]:
     """``"Caroline: ..."`` -> ``"Caroline"`` (transcripts that prefix the speaker)."""
     m = _SPEAKER_PREFIX.match(text)
-    return m.group(1) if m else None
+    if not m or m.group(1).lower() in _NOT_SPEAKERS:
+        return None
+    return m.group(1)
+
+
+# Words that end in a colon at the start of a message without naming anyone.
+_NOT_SPEAKERS = frozenset("""
+correction update note reminder edit ps fyi btw news important update todo question
+answer tip warning also actually ok okay so well
+""".split())
 
 
 def extract_slots(text: str, subject: str = "user") -> list[Slot]:

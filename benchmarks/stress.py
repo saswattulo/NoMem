@@ -44,6 +44,15 @@ FACTS = [
 ]
 
 
+# Statements that update each other, so the invariants also cover
+# conflict markers on retrieved memories.
+UPDATES = [
+    "I live in Pune.", "I moved to Bangalore last week!", "My flight leaves at 9am.",
+    "Actually my flight got moved to 11am.", "I have 2 kids.", "I have 3 kids now.",
+    "The party starts at 8pm.", "Change of plans: the party starts at 9pm instead.",
+]
+
+
 def _filler(rng: random.Random) -> str:
     return " ".join(rng.choice(FILLER) for _ in range(rng.randint(6, 18))).capitalize() + "."
 
@@ -101,13 +110,16 @@ def invariants(trials: int, seed: int = 1, mem_kwargs=None) -> dict:
         for i in range(rng.randint(0, 60)):
             if rng.random() < 0.15:
                 text = rng.choice(FACTS)[0]
+            elif rng.random() < 0.15:
+                text = rng.choice(UPDATES)
             elif rng.random() < 0.1 and msgs:
                 text = rng.choice(msgs).content  # exact repeats
             else:
                 text = _filler(rng) * rng.randint(1, 4)
             msgs.append(mem.add(rng.choice(["user", "assistant"]), text,
                                 timestamp=1.7e9 + 3600 * i * rng.random()))
-        query = rng.choice([None, "", "peanuts allergy", "sister Lisbon", "zzz", rng.choice(FACTS)[1]])
+        query = rng.choice([None, "", "peanuts allergy", "sister Lisbon", "zzz", rng.choice(FACTS)[1],
+                            "where do I live?", "when is my flight?", "party time"])
         res = mem.build_context(query=query)
 
         core_tokens = mem.counter.count_message("system", core) if core else 0

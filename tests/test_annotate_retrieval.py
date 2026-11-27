@@ -197,7 +197,8 @@ def test_retrieved_superseded_fact_is_flagged_with_the_new_value():
     for i in range(30):
         mem.add_user(f"more unrelated filler {i}", timestamp=REF + 86400 * 31 + i)
     res = mem.build_context(query="the canal in Paris")
-    assert "I live in Paris near the canal. (superseded: location changed on 7 Jun 2023; now Berlin)" in res.text
+    assert ('I live in Paris near the canal. [CONFLICT: changed on 7 Jun 2023 '
+            '(location: Paris near the canal -> Berlin); user said "I moved to Berlin."]') in res.text
 
 
 def test_invalid_facts_ratio_raises():

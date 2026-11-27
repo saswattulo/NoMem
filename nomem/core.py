@@ -27,6 +27,8 @@ from typing import Optional, Union
 
 from . import annotate as A
 from .compactor import Compactor, ExtractiveCompactor
+from .conflicts import (ConflictConfig, detect as detect_conflicts, slot_conflict_confidence,
+                        snippet, speaker_key)
 from .models import ContextResult, LogEntry, Message
 from .retrieval import Hit, RetrievalConfig, Retriever, slot_matches
 from .store import SQLiteStore
@@ -60,6 +62,11 @@ class NoMem:
             Default ``0`` (off): a pure sliding window plus retrieval.
         compactor: How dropped turns are summarised. Defaults to
             :class:`~nomem.compactor.ExtractiveCompactor` (quotes, no model).
+        conflicts: Contradiction detection on write (see
+            :class:`~nomem.conflicts.ConflictConfig`). When a newer memory
+            changes an older one, both are kept and linked, and retrieved
+            memories carry a ``[CONFLICT: ...]`` marker quoting the other
+            side with its date. Requires ``annotate``.
     """
 
     def __init__(
@@ -79,6 +86,7 @@ class NoMem:
         facts_ratio: float = 0.1,
         summary_ratio: float = 0.0,
         compactor: Optional[Compactor] = None,
+        conflicts: Optional[ConflictConfig] = None,
     ):
         if max_tokens < 1:
             raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
@@ -106,6 +114,7 @@ class NoMem:
         self.summary_lookback = 200  # turns before the window the compactor may quote
         self.compactor = compactor if compactor is not None else ExtractiveCompactor()
         self.embedder = embedder
+        self.conflict_config = conflicts or ConflictConfig()
         self.retriever = Retriever(self.store, user_id, session_id, retrieval, embedder)
 
     # -- writing ---------------------------------------------------------
@@ -129,44 +138,67 @@ class NoMem:
             self.user_id, self.session_id, role, content, tokens, metadata,
             created_at=timestamp, commit=False,
         )
+        if self.embedder is not None:
+            self.embedder.index(self.store, msg, self.user_id, self.session_id)
         if self.annotate:
             speaker = (metadata or {}).get("speaker") or A.speaker_of(content)
             ann = A.annotate(content, msg.created_at, subject=speaker or "user")
             self.store.add_annotation(msg, self.user_id, self.session_id, ann, commit=False)
             # Facts about a person come from what *they* say: assistant turns
             # never write slots unless a speaker is named.
+            linked: set[int] = set()
             if role == "user" or speaker:
-                self._apply_slots(ann.slots, msg)
-        if self.embedder is not None:
-            self.embedder.index(self.store, msg, self.user_id, self.session_id)
+                linked = self._apply_slots(ann.slots, msg)
+            cc = self.conflict_config
+            if cc.enabled:
+                for c in detect_conflicts(self.store, self.user_id, self.session_id, msg,
+                                          speaker_key(role, content, metadata), cc, self.embedder):
+                    if c.older_id not in linked:
+                        self.store.add_conflict(self.user_id, c.older_id, c.newer_id, c.kind,
+                                                c.detail, c.confidence, c.attribute)
         self.store.commit()
         return msg
 
-    def _apply_slots(self, slots: list, msg: Message) -> None:
+    def _apply_slots(self, slots: list, msg: Message) -> set[int]:
         """Record slot facts; a new single value supersedes the old one.
 
         Nothing is deleted: a superseded slot gets ``valid_to`` and a pointer
-        to the message that closed it, so history stays queryable.
+        to the message that closed it, so history stays queryable, and the
+        two messages are linked as a conflict so both can be shown.
+        Returns the ids of the earlier messages linked this way.
         """
         st, uid, ts = self.store, self.user_id, msg.created_at
         opposite = {"likes": "dislikes", "dislikes": "likes"}
+        linked: set[int] = set()
+        record = self.annotate and self.conflict_config.enabled
+
+        def close(row: dict, detail: str, new_value: Optional[str] = None) -> None:
+            st.close_slot(row["id"], ts, msg.id, commit=False)
+            src = row["source_message_id"]
+            conf = slot_conflict_confidence(row["attribute"], row["value"], new_value)
+            if record and src and src != msg.id and conf >= self.conflict_config.min_confidence:
+                st.add_conflict(uid, src, msg.id, "slot", detail, conf, row["attribute"])
+                linked.add(src)
+
         for sl in slots:
+            attr = sl.attribute.replace("_", " ")
             if sl.negated:
                 for row in st.current_slots(uid, sl.subject, sl.attribute):
                     if row["value"].lower() == sl.value.lower():
-                        st.close_slot(row["id"], ts, msg.id, commit=False)
+                        close(row, f"{attr}: {row['value']} -> no longer")
                 continue
             current = st.current_slots(uid, sl.subject, sl.attribute)
             if any(r["value"].lower() == sl.value.lower() for r in current):
                 continue
             if not sl.multi:
                 for row in current:
-                    st.close_slot(row["id"], ts, msg.id, commit=False)
+                    close(row, f"{attr}: {row['value']} -> {sl.value}", sl.value)
             if sl.attribute in opposite:
                 for row in st.current_slots(uid, sl.subject, opposite[sl.attribute]):
                     if row["value"].lower() == sl.value.lower():
-                        st.close_slot(row["id"], ts, msg.id, commit=False)
+                        close(row, f"{row['attribute']} -> {sl.attribute}: {sl.value}")
             st.add_slot(uid, sl.subject, sl.attribute, sl.value, sl.multi, ts, msg.id, commit=False)
+        return linked
 
     def add_user(self, content: str, **kwargs) -> Message:
         return self.add("user", content, **kwargs)
@@ -198,6 +230,25 @@ class NoMem:
     def fact_history(self) -> list[dict]:
         """Every slot fact ever recorded, including superseded ones."""
         return self.store.slot_history(self.user_id)
+
+    def conflicts(self, message_id: Optional[int] = None) -> list[dict]:
+        """Pairs of memories where a newer one may contradict an older one.
+
+        Each dict has ``older_id``/``newer_id``, ``older``/``newer`` (the
+        verbatim messages), ``older_at``/``newer_at`` (epoch seconds),
+        ``kind`` (``slot``, ``frame`` or ``update``), ``detail`` and
+        ``confidence``. Nothing is resolved: both memories stay as written.
+        """
+        rows = self.store.conflicts(self.user_id, None if message_id is None else [message_id])
+        msgs = self.store.get_messages([r["older_id"] for r in rows] + [r["newer_id"] for r in rows])
+        out = []
+        for r in rows:
+            o, n = msgs.get(r["older_id"]), msgs.get(r["newer_id"])
+            if o is None or n is None:
+                continue
+            out.append(r | {"older": o.content, "newer": n.content,
+                            "older_at": o.created_at, "newer_at": n.created_at})
+        return out
 
     def build_context(self, query: Optional[str] = None) -> ContextResult:
         """Assemble a prompt guaranteed to fit ``max_tokens``.
@@ -266,6 +317,9 @@ class NoMem:
                 budget -= r_reserved
         if retrieved:
             messages.append(self._retrieved_block(retrieved))
+            for mid, note in self._conflict_notes(retrieved).items():
+                log.append(LogEntry("conflict", "archival",
+                    f"message #{mid} flagged:{note}", 0, None, mid))
 
         # 3. Working memory — recent messages fill the remaining budget,
         #    newest first, skipping anything retrieval already surfaced.
@@ -461,10 +515,13 @@ class NoMem:
         # card is a general profile, newest first.
         rest = [] if query else sorted(current, key=lambda r: -r["valid_from"])
         lines: list[str] = [f"- {k}: {v}" for k, v in pinned.items()]
+        previous = self._previous_values(relevant + rest)
         for r in relevant + rest:
             who = "" if r["subject"] == "user" else f"{r['subject']} "
+            was = previous.get(r["id"])
+            was = f"; before that {was[0]}, said {_date(was[1])}" if was else ""
             lines.append(f"- {who}{r['attribute'].replace('_', ' ')}: {r['value']} "
-                         f"(since {_date(r['valid_from'])})")
+                         f"(since {_date(r['valid_from'])}{was})")
         if not lines:
             log.append(LogEntry("skipped", "core", "state card: no stored fact matches the query", 0, cap))
             return None, 0
@@ -483,33 +540,59 @@ class NoMem:
             f"state card: {len(kept)} of {len(lines)} fact(s), {len(relevant)} matched the query", cost, cap - cost))
         return {"role": "system", "content": "\n".join([head] + kept)}, cost
 
+    def _previous_values(self, rows: list[dict]) -> dict[int, tuple[str, float]]:
+        """For each current slot row, the value it replaced, if it is a real update."""
+        cc = self.conflict_config
+        if not rows or not cc.enabled or cc.show_per_memory <= 0:
+            return {}
+        by_closer: dict[tuple, dict] = {}
+        for h in self.store.slot_history(self.user_id):
+            if h["closed_by"]:
+                by_closer[(h["closed_by"], h["subject"], h["attribute"])] = h
+        out: dict[int, tuple[str, float]] = {}
+        for r in rows:
+            h = by_closer.get((r["source_message_id"], r["subject"], r["attribute"]))
+            if h and not r["multi"] and slot_conflict_confidence(
+                    r["attribute"], h["value"], r["value"]) >= cc.show_min_confidence:
+                out[r["id"]] = (h["value"], h["valid_from"])
+        return out
+
     def _retrieved_block(self, items: list[Message]) -> dict:
         """Render retrieved memories as a single labelled system message.
 
-        A memory whose fact was later superseded says so, with the newer
-        value, so the agent sees the change instead of a silent conflict.
+        A memory linked to a contradicting one carries a ``[CONFLICT: ...]``
+        marker that quotes the other side with its date, so the agent sees
+        both versions and decides, instead of meeting a silent contradiction.
         """
-        notes = self._superseded_notes(items) if items else {}
+        notes = self._conflict_notes(items) if items else {}
         lines = ["Relevant earlier context:"] + [
             f"- [{_date(m.created_at)}] {m.role}: {m.content}{notes.get(m.id, '')}" for m in items
         ]
         return {"role": "system", "content": "\n".join(lines)}
 
-    def _superseded_notes(self, items: list[Message]) -> dict[int, str]:
-        src = self.store.slots_from_messages(self.user_id, [m.id for m in items])
-        notes: dict[int, str] = {}
-        for mid, rows in src.items():
-            parts = []
-            for r in rows:
-                if r["valid_to"] is None or not r["closed_by"]:
+    def _conflict_notes(self, items: list[Message]) -> dict[int, str]:
+        cc = self.conflict_config
+        if not cc.enabled or cc.show_per_memory <= 0:
+            return {}
+        ids = {m.id for m in items}
+        rows = [r for r in self.store.conflicts(self.user_id, list(ids)) if r["confidence"] >= cc.show_min_confidence]
+        if not rows:
+            return {}
+        need = [i for r in rows for i in (r["older_id"], r["newer_id"]) if i not in ids]
+        by_id = {m.id: m for m in items} | self.store.get_messages(need)
+        notes: dict[int, list[str]] = {}
+        for r in sorted(rows, key=lambda r: -r["confidence"]):
+            o, n = by_id.get(r["older_id"]), by_id.get(r["newer_id"])
+            if o is None or n is None:
+                continue
+            for me, other, newer in ((o, n, False), (n, o, True)):
+                if me.id not in ids or len(notes.get(me.id, [])) >= cc.show_per_memory:
                     continue
-                newer = [n for n in self.store.slots_from_messages(self.user_id, [r["closed_by"]]).get(r["closed_by"], [])
-                         if n["attribute"] == r["attribute"]]
-                now = f"; now {newer[0]['value']}" if newer else ""
-                parts.append(f"{r['attribute'].replace('_', ' ')} changed on {_date(r['valid_to'])}{now}")
-            if parts:
-                notes[mid] = " (superseded: " + "; ".join(parts) + ")"
-        return notes
+                verb = f"updates {_date(other.created_at)}" if newer else f"changed on {_date(other.created_at)}"
+                quote = (f"see the {_date(other.created_at)} memory in this list"
+                         if other.id in ids else f'{other.role} said "{snippet(other.content, cc.quote_chars)}"')
+                notes.setdefault(me.id, []).append(f"{verb} ({r['detail']}); {quote}")
+        return {mid: " [CONFLICT: " + " | ".join(parts) + "]" for mid, parts in notes.items()}
 
     @staticmethod
     def _render(messages: list[dict]) -> str:
