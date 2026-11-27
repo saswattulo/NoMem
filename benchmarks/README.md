@@ -23,7 +23,12 @@ curl -L -o benchmarks/data/locomo10.json \
 python benchmarks/run_all.py            # everything, ~1-2 minutes
 python benchmarks/locomo_bench.py       # retrieval quality only
 python benchmarks/stress.py --quick     # latency + invariants, smaller scale
+python benchmarks/run_all.py --embedder model2vec   # same, with the vector ranker
+python benchmarks/run_all.py --embedder hashing --vector-weight 0.5  # ablations
 ```
+
+`--embedder model2vec` needs `pip install nomem[embed]` and downloads
+`minishlab/potion-base-8M` (~30 MB) from Hugging Face once.
 
 Category 5 (adversarial, unanswerable) questions are excluded because they
 have no evidence turn. All runs use the deterministic `ApproxCounter` so

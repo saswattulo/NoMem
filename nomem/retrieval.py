@@ -28,10 +28,10 @@ from .models import Message
 class RetrievalConfig:
     """Knobs for :class:`Retriever`. Defaults are what the benchmarks back."""
 
-    pool: int = 50                 # candidates taken from each ranker
+    pool: int = 100                # candidates taken from each ranker
     rrf_k: int = 60                # Cormack et al. 2009
     weights: dict = field(default_factory=lambda: {
-        "keyword": 1.0, "entity": 0.5, "time": 0.5, "vector": 1.0, "context": 0.2, "slot": 0.5,
+        "keyword": 1.0, "entity": 0.5, "time": 0.5, "vector": 0.15, "context": 0.2, "slot": 0.5,
     })
     importance_weight: float = 0.3  # final *= (1 - w/2 + w * importance)
     recency_half_life_days: Optional[float] = None  # None = no recency prior

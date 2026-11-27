@@ -165,10 +165,15 @@ mem = NoMem(embedder=Model2VecEmbedder())  # minishlab/potion-base-8M by default
 ```
 
 `Model2VecEmbedder` is the recommended default: ~8M parameters, CPU-only,
-fast enough to embed every message on write. `SentenceTransformerEmbedder`
-takes any sentence-transformers model; subclass `Embedder` for anything
-else. `HashingEmbedder` (character n-grams, no model) exists for offline use
-and tests; it catches typos but does not improve LoCoMo retrieval.
+~30 MB, fast enough to embed every message on write (~0.4 ms each). On
+LoCoMo it lifts search recall@5 from 56.8% to 58.6% and context recall from
+57.6% to 59.7%. The vector ranker is a light tie-breaker by default
+(`weights["vector"] = 0.15`): static embeddings are weaker than keyword
+matching on their own (41.7% recall@5 vector-only) and pull recall *down*
+at equal weight. `SentenceTransformerEmbedder` takes any sentence-transformers
+model (raise the vector weight for a stronger encoder); subclass `Embedder`
+for anything else. `HashingEmbedder` (character n-grams, no model) exists for
+offline use and tests.
 
 ## Design choices
 
@@ -191,13 +196,14 @@ step in [`benchmarks/TRAJECTORY.md`](benchmarks/TRAJECTORY.md)). LoCoMo: did
 the evidence turn for each of 1,531 answerable questions land in the top-5
 search results, and in a 1,000-token context?
 
-| | v0.1 (FTS5 only) | v0.2 (hybrid, LLM-free) |
-| --- | --- | --- |
-| LoCoMo search recall@5 | 50.9% | 56.4% |
-| LoCoMo context recall | 52.5% | 57.3% |
-| Query latency at 50k messages | 190 ms | 2.6 ms |
-| Planted facts recalled at 50k messages | 7/8 | 8/8 |
-| Write cost | 0 model calls | 0 model calls |
+| | v0.1 (FTS5 only) | v0.2 (hybrid, LLM-free) | v0.2 + Model2Vec |
+| --- | --- | --- | --- |
+| LoCoMo search recall@5 | 50.9% | 56.8% | 58.6% |
+| LoCoMo context recall | 52.5% | 57.6% | 59.7% |
+| Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
+| Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
+| Write throughput | | ~4,000 msg/s | ~1,500 msg/s |
+| Write cost | 0 model calls | 0 model calls | 1 embedding (no generative model) |
 
 ## Roadmap
 

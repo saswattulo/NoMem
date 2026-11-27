@@ -48,9 +48,9 @@ def _filler(rng: random.Random) -> str:
     return " ".join(rng.choice(FILLER) for _ in range(rng.randint(6, 18))).capitalize() + "."
 
 
-def scale(n: int, seed: int = 0) -> dict:
+def scale(n: int, seed: int = 0, mem_kwargs=None) -> dict:
     rng = random.Random(seed)
-    mem = NoMem(max_tokens=800, counter=ApproxCounter(), core="You are helpful.")
+    mem = NoMem(max_tokens=800, counter=ApproxCounter(), core="You are helpful.", **(mem_kwargs or {}))
     positions = sorted(rng.sample(range(n), len(FACTS)))
     plant = dict(zip(positions, FACTS))
     t0 = time.perf_counter()
@@ -81,7 +81,7 @@ def scale(n: int, seed: int = 0) -> dict:
     }
 
 
-def invariants(trials: int, seed: int = 1) -> dict:
+def invariants(trials: int, seed: int = 1, mem_kwargs=None) -> dict:
     rng = random.Random(seed)
     checked = 0
     for t in range(trials):
@@ -95,6 +95,7 @@ def invariants(trials: int, seed: int = 1) -> dict:
             archival_ratio=rng.choice([0.0, 0.1, 0.3, 0.5, 1.0]),
             facts_ratio=rng.choice([0.0, 0.1, 0.3]),
             summary_ratio=rng.choice([0.0, 0.0, 0.1, 0.3]),
+            **(mem_kwargs or {}),
         )
         msgs = []
         for i in range(rng.randint(0, 60)):
@@ -125,11 +126,11 @@ def invariants(trials: int, seed: int = 1) -> dict:
     return {"invariant_trials": checked, "violations": 0}
 
 
-def run(quick: bool = False) -> dict:
+def run(quick: bool = False, mem_kwargs=None) -> dict:
     sizes = [1_000, 10_000] if quick else [1_000, 10_000, 50_000]
     return {
-        "scale": [scale(n) for n in sizes],
-        "invariants": invariants(200 if quick else 500),
+        "scale": [scale(n, mem_kwargs=mem_kwargs) for n in sizes],
+        "invariants": invariants(200 if quick else 500, mem_kwargs=mem_kwargs),
     }
 
 

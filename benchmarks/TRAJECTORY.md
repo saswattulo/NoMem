@@ -26,3 +26,18 @@ Scale rows use synthetic chat with 8 planted facts; latency is per `build_contex
 | 5b. Ablation: + HashingEmbedder, vector weight 0.5 | 53.6 | 61.3 | 54.7 | 24.7 | 62.5 | 26.3 | 64.7 | | | | |
 | 5. Optional embedder interface (off by default); neighbour boost reworked as a share of the seed's score | 56.4 | 63.6 | 57.3 | 27.3 | 65.0 | 28.2 | 67.4 | 1.4 ms | 2.6 ms | 8/8 | 500/500 |
 | 6. Docs, examples, slot-synonym fix ("for a living" now maps to job, not location), v0.2.0 | 56.4 | 63.6 | 57.3 | 27.3 | 65.0 | 28.2 | 67.4 | 1.8 ms | 2.8 ms | 8/8 | 500/500 |
+| 7a. Ablation: + Model2Vec potion-base-8M, vector weight 1.0 (old default) | 53.9 | 61.6 | 54.9 | 26.3 | 64.7 | 29.7 | 63.5 | 4.3 ms | 5.8 ms | 8/8 | 500/500 |
+| 7b. Ablation: Model2Vec vector-only (every other ranker at 0) | 41.7 | 49.3 | 43.1 | 20.2 | 54.1 | 26.2 | 48.3 | | | | |
+| 7c. Ablation: + Model2Vec, vector weight 0.5 | 55.9 | 63.8 | 56.9 | 26.8 | 65.8 | 29.8 | 66.4 | | | | |
+| 7d. Ablation: + Model2Vec, vector weight 0.25 | 57.1 | 64.7 | 58.3 | 27.3 | 66.5 | 30.0 | 68.4 | | | | |
+| 7e. Ablation: + Model2Vec, vector weight 0.1 | 57.9 | 65.0 | 58.9 | 29.0 | 66.4 | 31.1 | 68.9 | | | | |
+| 7f. Ablation: keyword only, ranker pool 50 -> 100 | 56.8 | 64.0 | 57.6 | 27.4 | 65.1 | 28.2 | 68.0 | | | | |
+| 7g. Ablation: + Model2Vec, vector weight 0.15, pool 200 | 58.7 | 66.5 | 59.7 | 29.8 | 66.8 | 31.1 | 70.0 | | | | |
+| 7h. Ablation: + HashingEmbedder at the new defaults | 57.6 | 65.2 | 58.5 | | | | | | | | |
+| 7. Defaults: vector weight 1.0 -> 0.15, ranker pool 50 -> 100. **Keyword only** (no embedder) | 56.8 | 64.0 | 57.6 | 27.4 | 65.1 | 28.2 | 68.0 | 1.5 ms | 3.1 ms | 8/8 | 500/500 |
+| 7. Same defaults **+ Model2Vec potion-base-8M** (`run_all.py --embedder model2vec`) | **58.6** | **66.0** | **59.7** | 29.1 | 67.1 | 31.1 | 70.1 | 3.5 ms | 7.1 ms | 8/8 | 500/500 |
+
+Step 7 held-out check: tuned weights also win on each half of LoCoMo separately
+(conversations 0-4: R@5 55.5 -> 59.4 vs old Model2Vec settings; conversations 5-9:
+52.3 -> 57.9), so the gain is not an artefact of tuning on all ten. Model2Vec
+writes run at ~1,500 msg/s (one embedding per message) vs ~4,000 msg/s keyword only.
