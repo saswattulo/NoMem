@@ -21,9 +21,14 @@ Example
 
 from __future__ import annotations
 
+import time
+from datetime import datetime
 from typing import Optional, Union
 
+from . import annotate as A
+from .compactor import Compactor, ExtractiveCompactor
 from .models import ContextResult, LogEntry, Message
+from .retrieval import Hit, RetrievalConfig, Retriever, slot_matches
 from .store import SQLiteStore
 from .tokens import TokenCounter, default_counter
 
@@ -41,6 +46,20 @@ class NoMem:
         archival_ratio: Fraction of the post-core budget reserved for
             retrieved memories when a ``query`` is given (the rest goes to
             recent conversation; unused reservation rolls over to it).
+        retrieval: Tuning for the hybrid retriever (see
+            :class:`~nomem.retrieval.RetrievalConfig`).
+        embedder: Optional :class:`~nomem.embed.Embedder` adding semantic
+            (vector) retrieval. ``None`` keeps NoMem model-free.
+        annotate: Extract entities, dates, keyphrases and slot facts on
+            write (deterministic rules, no model). Default ``True``.
+        facts_ratio: Most of the post-core budget the "known facts" state
+            card may use (current slot facts + :meth:`remember` facts,
+            query-relevant first). Unused budget rolls over. ``0`` disables.
+        summary_ratio: Share of the post-core budget reserved for an
+            extractive summary of turns that just fell out of the window.
+            Default ``0`` (off): a pure sliding window plus retrieval.
+        compactor: How dropped turns are summarised. Defaults to
+            :class:`~nomem.compactor.ExtractiveCompactor` (quotes, no model).
     """
 
     def __init__(
@@ -54,9 +73,19 @@ class NoMem:
         counter: Optional[TokenCounter] = None,
         retrieval_top_k: int = 5,
         archival_ratio: float = 0.3,
+        retrieval: Optional[RetrievalConfig] = None,
+        embedder=None,
+        annotate: bool = True,
+        facts_ratio: float = 0.1,
+        summary_ratio: float = 0.0,
+        compactor: Optional[Compactor] = None,
     ):
         if max_tokens < 1:
             raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
+        if not 0.0 <= summary_ratio <= 1.0:
+            raise ValueError(f"summary_ratio must be within [0.0, 1.0], got {summary_ratio}")
+        if not 0.0 <= facts_ratio <= 1.0:
+            raise ValueError(f"facts_ratio must be within [0.0, 1.0], got {facts_ratio}")
         if not 0.0 <= archival_ratio <= 1.0:
             raise ValueError(f"archival_ratio must be within [0.0, 1.0], got {archival_ratio}")
         if retrieval_top_k < 0:
@@ -71,15 +100,73 @@ class NoMem:
         self._owns_store = not isinstance(db, SQLiteStore)
         self.store = db if isinstance(db, SQLiteStore) else SQLiteStore(db)
         self._log: list[LogEntry] = []
+        self.annotate = annotate
+        self.facts_ratio = facts_ratio
+        self.summary_ratio = summary_ratio
+        self.summary_lookback = 200  # turns before the window the compactor may quote
+        self.compactor = compactor if compactor is not None else ExtractiveCompactor()
+        self.embedder = embedder
+        self.retriever = Retriever(self.store, user_id, session_id, retrieval, embedder)
 
     # -- writing ---------------------------------------------------------
 
-    def add(self, role: str, content: str, *, metadata: Optional[dict] = None) -> Message:
-        """Persist a message to the working/archival tiers."""
+    def add(
+        self,
+        role: str,
+        content: str,
+        *,
+        metadata: Optional[dict] = None,
+        timestamp: Optional[float] = None,
+    ) -> Message:
+        """Persist a message verbatim, then index it.
+
+        ``timestamp`` (epoch seconds) backdates the message, e.g. when
+        importing an existing transcript; it anchors relative dates such as
+        "yesterday" and the dates shown on retrieved memories.
+        """
         tokens = self.counter.count_message(role, content)
-        return self.store.add_message(
-            self.user_id, self.session_id, role, content, tokens, metadata
+        msg = self.store.add_message(
+            self.user_id, self.session_id, role, content, tokens, metadata,
+            created_at=timestamp, commit=False,
         )
+        if self.annotate:
+            speaker = (metadata or {}).get("speaker") or A.speaker_of(content)
+            ann = A.annotate(content, msg.created_at, subject=speaker or "user")
+            self.store.add_annotation(msg, self.user_id, self.session_id, ann, commit=False)
+            # Facts about a person come from what *they* say: assistant turns
+            # never write slots unless a speaker is named.
+            if role == "user" or speaker:
+                self._apply_slots(ann.slots, msg)
+        if self.embedder is not None:
+            self.embedder.index(self.store, msg, self.user_id, self.session_id)
+        self.store.commit()
+        return msg
+
+    def _apply_slots(self, slots: list, msg: Message) -> None:
+        """Record slot facts; a new single value supersedes the old one.
+
+        Nothing is deleted: a superseded slot gets ``valid_to`` and a pointer
+        to the message that closed it, so history stays queryable.
+        """
+        st, uid, ts = self.store, self.user_id, msg.created_at
+        opposite = {"likes": "dislikes", "dislikes": "likes"}
+        for sl in slots:
+            if sl.negated:
+                for row in st.current_slots(uid, sl.subject, sl.attribute):
+                    if row["value"].lower() == sl.value.lower():
+                        st.close_slot(row["id"], ts, msg.id, commit=False)
+                continue
+            current = st.current_slots(uid, sl.subject, sl.attribute)
+            if any(r["value"].lower() == sl.value.lower() for r in current):
+                continue
+            if not sl.multi:
+                for row in current:
+                    st.close_slot(row["id"], ts, msg.id, commit=False)
+            if sl.attribute in opposite:
+                for row in st.current_slots(uid, sl.subject, opposite[sl.attribute]):
+                    if row["value"].lower() == sl.value.lower():
+                        st.close_slot(row["id"], ts, msg.id, commit=False)
+            st.add_slot(uid, sl.subject, sl.attribute, sl.value, sl.multi, ts, msg.id, commit=False)
 
     def add_user(self, content: str, **kwargs) -> Message:
         return self.add("user", content, **kwargs)
@@ -88,6 +175,29 @@ class NoMem:
         return self.add("assistant", content, **kwargs)
 
     # -- reading ---------------------------------------------------------
+
+    def search(self, query: str, k: Optional[int] = None) -> list[Message]:
+        """Archival search: the best ``k`` matching messages, best first."""
+        return [h.message for h in self.search_hits(query, k)]
+
+    def search_hits(self, query: str, k: Optional[int] = None) -> list[Hit]:
+        """Like :meth:`search`, with scores and the rankers that found each hit."""
+        k = self.retrieval_top_k if k is None else k
+        if not getattr(self.store, "fts_enabled", True) and self.embedder is None:
+            return []
+        return self.retriever.search(query, k, time.time())
+
+    def remember(self, key: str, value: str) -> None:
+        """Pin a durable fact for this user; it joins the state card."""
+        self.store.upsert_fact(self.user_id, key, value)
+
+    def facts(self, subject: Optional[str] = None) -> list[dict]:
+        """Current slot facts (``valid_to`` unset), oldest first."""
+        return self.store.current_slots(self.user_id, subject)
+
+    def fact_history(self) -> list[dict]:
+        """Every slot fact ever recorded, including superseded ones."""
+        return self.store.slot_history(self.user_id)
 
     def build_context(self, query: Optional[str] = None) -> ContextResult:
         """Assemble a prompt guaranteed to fit ``max_tokens``.
@@ -116,9 +226,31 @@ class NoMem:
             else:
                 log.append(LogEntry("core", "core", "included fixed core memory", core_tokens, budget))
 
+        # 1b. State card — current facts, query-relevant first, from slots
+        #     the rules extracted and facts pinned with remember().
+        if self.facts_ratio > 0 and budget > 0:
+            cap = int(budget * self.facts_ratio)
+            card, cost = self._state_card(query, cap, log)
+            if card:
+                messages.append(card)
+                used += cost
+                budget -= cost
+
+        # Reserve the summary slice now so retrieval and the window plan
+        # around it; it is spent after the window settles which turns drop.
+        s_cap = int(budget * self.summary_ratio) if self.summary_ratio > 0 and budget > 0 else 0
+        budget -= s_cap
+
         # One read of the session's messages serves both the retrieval
         # exclusion probe and the final window fill.
-        recent = self.store.recent_messages(self.user_id, self.session_id)
+        # Only the newest messages can ever fit, so never read more than the
+        # most the budget could hold (+1 to see the first one that doesn't).
+        # With a summary slice, also read a stretch before the window for
+        # the compactor to quote from.
+        read_limit = self._window_limit() + (self.summary_lookback if s_cap else 0)
+        recent = self.store.recent_messages(
+            self.user_id, self.session_id, limit=read_limit
+        )
 
         # 2. Archival retrieval — pull older, relevant messages back into
         #    context, up to a reserved slice of the remaining budget.
@@ -138,6 +270,15 @@ class NoMem:
         # 3. Working memory — recent messages fill the remaining budget,
         #    newest first, skipping anything retrieval already surfaced.
         kept = self._fill_working(recent, budget, retrieved_ids, log)
+        if s_cap:
+            summary, s_used = self._summarise(recent, kept, retrieved_ids, s_cap, log)
+            if summary:
+                messages.append(summary)
+                used += s_used
+        unread = self.message_count() - len(recent) if len(recent) == read_limit else 0
+        if unread > 0:
+            log.append(LogEntry("budget_exhausted", "working",
+                f"{unread} older message(s) not read: they cannot fit the budget", 0, None))
         for m in kept:
             used += m.tokens if m.tokens is not None else self.counter.count_message(m.role, m.content)
         messages.extend(m.as_dict() for m in kept)
@@ -178,14 +319,14 @@ class NoMem:
         Returns the retrieved messages, their ids, the tokens they actually
         cost, and the reservation to charge the window (equal, once settled).
         """
-        if not getattr(self.store, "fts_enabled", True):
+        if not getattr(self.store, "fts_enabled", True) and self.embedder is None:
             log.append(LogEntry("skipped", "archival",
                 "retrieval unavailable (SQLite built without FTS5)", 0, cap))
             return [], set(), 0, 0
 
-        candidates = self.store.search(
-            self.user_id, self.session_id, query, self.retrieval_top_k
-        )
+        hits = self.search_hits(query, self.retrieval_top_k)
+        self._why = {h.message.id: ", ".join(h.reasons) for h in hits}
+        candidates = [h.message for h in hits]
 
         spend = cap
         for _ in range(self.retrieval_top_k + 2):
@@ -224,7 +365,8 @@ class NoMem:
             cost = self.counter.count_message("system", self._retrieved_block(included + [m])["content"])
             if cost <= cap:
                 log.append(LogEntry("retrieved", "archival",
-                    f"{m.role} message #{m.id} (relevance match)", cost - used, cap - cost, m.id))
+                    f"{m.role} message #{m.id} (matched by {getattr(self, '_why', {}).get(m.id) or 'relevance'})",
+                    cost - used, cap - cost, m.id))
                 included.append(m)
                 used = cost
             else:
@@ -233,6 +375,10 @@ class NoMem:
         log.append(LogEntry("retrieval", "archival",
             f"retrieved {len(included)} of {len(candidates)} match(es) for query", used, cap - used))
         return included, {m.id for m in included}, used
+
+    def _window_limit(self) -> int:
+        smallest = max(1, self.counter.count_message("user", ""))
+        return self.max_tokens // smallest + 1
 
     def _window_ids(self, recent: list[Message], budget: int) -> set[int]:
         """Ids the recent window would hold at ``budget``.
@@ -286,11 +432,84 @@ class NoMem:
         kept.reverse()  # chronological order for the final prompt
         return kept
 
-    @staticmethod
-    def _retrieved_block(items: list[Message]) -> dict:
-        """Render retrieved memories as a single labelled system message."""
-        lines = ["Relevant earlier context:"] + [f"- {m.role}: {m.content}" for m in items]
+    def _summarise(self, recent, kept, retrieved_ids, cap: int, log: list[LogEntry]):
+        """Extractive summary of the turns just before the window."""
+        kept_ids = {m.id for m in kept}
+        dropped = [m for m in reversed(recent) if m.id not in kept_ids and m.id not in retrieved_ids]
+        if not dropped:
+            log.append(LogEntry("skipped", "working", "no dropped turns to summarise", 0, cap))
+            return None, 0
+        text = self.compactor.compact(dropped, max_tokens=cap, counter=self.counter)
+        cost = self.counter.count_message("system", text) if text else 0
+        if not text or cost > cap:
+            log.append(LogEntry("skipped", "working",
+                f"nothing from {len(dropped)} dropped turn(s) fit the {cap}-tok summary slice", 0, cap))
+            return None, 0
+        n_lines = text.count("\n")
+        log.append(LogEntry("summarized", "working",
+            f"{n_lines} key sentence(s) quoted from {len(dropped)} dropped turn(s)", cost, cap - cost))
+        return {"role": "system", "content": text}, cost
+
+    def _state_card(self, query: Optional[str], cap: int, log: list[LogEntry]):
+        """Greedy-fill a "Known facts" block within ``cap`` tokens."""
+        pinned = self.store.get_facts(self.user_id)
+        current = self.store.current_slots(self.user_id)
+        if not pinned and not current:
+            return None, 0
+        relevant = [r for r in slot_matches(self.store, self.user_id, query, False)] if query else []
+        # With a query, only facts it asks about earn budget; without one the
+        # card is a general profile, newest first.
+        rest = [] if query else sorted(current, key=lambda r: -r["valid_from"])
+        lines: list[str] = [f"- {k}: {v}" for k, v in pinned.items()]
+        for r in relevant + rest:
+            who = "" if r["subject"] == "user" else f"{r['subject']} "
+            lines.append(f"- {who}{r['attribute'].replace('_', ' ')}: {r['value']} "
+                         f"(since {_date(r['valid_from'])})")
+        if not lines:
+            log.append(LogEntry("skipped", "core", "state card: no stored fact matches the query", 0, cap))
+            return None, 0
+        head = "Known facts:"
+        kept: list[str] = []
+        cost = 0
+        for line in lines:
+            trial = self.counter.count_message("system", "\n".join([head] + kept + [line]))
+            if trial <= cap:
+                kept.append(line)
+                cost = trial
+        if not kept:
+            log.append(LogEntry("dropped", "core", f"state card ({len(lines)} facts) does not fit {cap} tokens", 0, cap))
+            return None, 0
+        log.append(LogEntry("facts", "core",
+            f"state card: {len(kept)} of {len(lines)} fact(s), {len(relevant)} matched the query", cost, cap - cost))
+        return {"role": "system", "content": "\n".join([head] + kept)}, cost
+
+    def _retrieved_block(self, items: list[Message]) -> dict:
+        """Render retrieved memories as a single labelled system message.
+
+        A memory whose fact was later superseded says so, with the newer
+        value, so the agent sees the change instead of a silent conflict.
+        """
+        notes = self._superseded_notes(items) if items else {}
+        lines = ["Relevant earlier context:"] + [
+            f"- [{_date(m.created_at)}] {m.role}: {m.content}{notes.get(m.id, '')}" for m in items
+        ]
         return {"role": "system", "content": "\n".join(lines)}
+
+    def _superseded_notes(self, items: list[Message]) -> dict[int, str]:
+        src = self.store.slots_from_messages(self.user_id, [m.id for m in items])
+        notes: dict[int, str] = {}
+        for mid, rows in src.items():
+            parts = []
+            for r in rows:
+                if r["valid_to"] is None or not r["closed_by"]:
+                    continue
+                newer = [n for n in self.store.slots_from_messages(self.user_id, [r["closed_by"]]).get(r["closed_by"], [])
+                         if n["attribute"] == r["attribute"]]
+                now = f"; now {newer[0]['value']}" if newer else ""
+                parts.append(f"{r['attribute'].replace('_', ' ')} changed on {_date(r['valid_to'])}{now}")
+            if parts:
+                notes[mid] = " (superseded: " + "; ".join(parts) + ")"
+        return notes
 
     @staticmethod
     def _render(messages: list[dict]) -> str:
@@ -314,3 +533,7 @@ class NoMem:
         """
         if self._owns_store:
             self.store.close()
+
+
+def _date(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%d %b %Y").lstrip("0")

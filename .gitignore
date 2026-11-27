@@ -24,3 +24,5 @@ htmlcov/
 .idea/
 .DS_Store
 .claude/
+benchmarks/data/
+benchmarks/results/

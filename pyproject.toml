@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nomem"
-version = "0.1.0"
-description = "Not Only Memory — a transparent, token-budgeted memory layer for agentic and RAG applications."
+version = "0.2.0"
+description = "Not Only Memory — a transparent, token-budgeted, LLM-free memory layer for agentic and RAG applications."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -27,6 +27,7 @@ dependencies = []
 openai = ["tiktoken>=0.5"]
 anthropic = ["anthropic>=0.39"]
 langchain = ["langchain-core>=0.1"]
+embed = ["model2vec>=0.4", "numpy>=1.24"]
 dev = ["pytest>=7"]
 
 [project.urls]

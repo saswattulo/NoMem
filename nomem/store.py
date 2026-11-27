@@ -44,6 +44,56 @@ CREATE TABLE IF NOT EXISTS summaries (
 );
 CREATE INDEX IF NOT EXISTS idx_summaries_scope ON summaries(user_id, session_id, id);
 
+CREATE TABLE IF NOT EXISTS annotations (
+    message_id INTEGER PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    importance REAL NOT NULL DEFAULT 0,
+    norm_hash  TEXT,
+    simhash    INTEGER,
+    keyphrases TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ann_hash ON annotations(user_id, session_id, norm_hash);
+
+CREATE TABLE IF NOT EXISTS entities (
+    message_id INTEGER NOT NULL,
+    user_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    entity     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entities ON entities(user_id, session_id, entity);
+
+CREATE TABLE IF NOT EXISTS times (
+    message_id INTEGER NOT NULL,
+    user_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    t_start    REAL NOT NULL,
+    t_end      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_times ON times(user_id, session_id, t_start);
+
+CREATE TABLE IF NOT EXISTS slots (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           TEXT NOT NULL,
+    subject           TEXT NOT NULL,
+    attribute         TEXT NOT NULL,
+    value             TEXT NOT NULL,
+    multi             INTEGER NOT NULL DEFAULT 0,
+    valid_from        REAL NOT NULL,
+    valid_to          REAL,
+    source_message_id INTEGER,
+    closed_by         INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_slots ON slots(user_id, subject, attribute, valid_to);
+
+CREATE TABLE IF NOT EXISTS vectors (
+    message_id INTEGER PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    vec        BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_vectors ON vectors(user_id, session_id);
+
 CREATE TABLE IF NOT EXISTS facts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    TEXT NOT NULL,
@@ -91,6 +141,12 @@ def _fts_query(text: str) -> Optional[str]:
     return " OR ".join(f'"{t}"' for t in terms)
 
 
+def _chunks(ids: list[int], n: int = 500):
+    ids = list(ids)
+    for i in range(0, len(ids), n):
+        yield ids[i:i + n]
+
+
 class SQLiteStore:
     def __init__(self, path: str = ":memory:"):
         self.path = path
@@ -116,8 +172,10 @@ class SQLiteStore:
         content: str,
         tokens: Optional[int] = None,
         metadata: Optional[dict] = None,
+        created_at: Optional[float] = None,
+        commit: bool = True,
     ) -> Message:
-        created_at = time.time()
+        created_at = time.time() if created_at is None else created_at
         cur = self.conn.execute(
             "INSERT INTO messages (user_id, session_id, role, content, tokens, created_at, metadata)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -129,7 +187,8 @@ class SQLiteStore:
                 "INSERT INTO messages_fts (content, message_id, user_id, session_id) VALUES (?, ?, ?, ?)",
                 (content, msg_id, user_id, session_id),
             )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return Message(
             role=role,
             content=content,
@@ -169,6 +228,178 @@ class SQLiteStore:
             (match, user_id, session_id, k),
         )
         return [self._row_to_message(r) for r in rows]
+
+    def fts_ranked(
+        self, user_id: str, session_id: str, query: str, k: int
+    ) -> list[int]:
+        """Message ids by BM25 (best first)."""
+        if not self.fts_enabled:
+            return []
+        match = _fts_query(query)
+        if match is None:
+            return []
+        rows = self.conn.execute(
+            "SELECT f.message_id AS id FROM messages_fts f "
+            "WHERE messages_fts MATCH ? AND f.user_id = ? AND f.session_id = ? "
+            "ORDER BY bm25(messages_fts) LIMIT ?",
+            (match, user_id, session_id, k),
+        )
+        return [int(r["id"]) for r in rows]
+
+    def get_messages(self, ids: list[int]) -> dict[int, Message]:
+        out: dict[int, Message] = {}
+        for chunk in _chunks(ids):
+            q = f"SELECT * FROM messages WHERE id IN ({','.join('?' * len(chunk))})"
+            for r in self.conn.execute(q, chunk):
+                out[r["id"]] = self._row_to_message(r)
+        return out
+
+    # -- annotations ------------------------------------------------------
+
+    def add_annotation(self, msg: Message, user_id: str, session_id: str, ann, commit: bool = True) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO annotations (message_id, user_id, session_id, importance, norm_hash, simhash, keyphrases)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (msg.id, user_id, session_id, ann.importance, ann.norm_hash, ann.simhash, json.dumps(ann.keyphrases)),
+        )
+        self.conn.executemany(
+            "INSERT INTO entities (message_id, user_id, session_id, entity) VALUES (?, ?, ?, ?)",
+            [(msg.id, user_id, session_id, e) for e in ann.entities],
+        )
+        self.conn.executemany(
+            "INSERT INTO times (message_id, user_id, session_id, t_start, t_end) VALUES (?, ?, ?, ?, ?)",
+            [(msg.id, user_id, session_id, a, b) for a, b in ann.times],
+        )
+        if commit:
+            self.conn.commit()
+
+    def annotations(self, ids: list[int]) -> dict[int, dict]:
+        out: dict[int, dict] = {}
+        for chunk in _chunks(ids):
+            q = f"SELECT * FROM annotations WHERE message_id IN ({','.join('?' * len(chunk))})"
+            for r in self.conn.execute(q, chunk):
+                out[r["message_id"]] = dict(r)
+        return out
+
+    def find_by_hash(self, user_id: str, session_id: str, norm_hash: str, before_id: int) -> Optional[int]:
+        row = self.conn.execute(
+            "SELECT message_id FROM annotations WHERE user_id = ? AND session_id = ? AND norm_hash = ?"
+            " AND message_id < ? ORDER BY message_id LIMIT 1",
+            (user_id, session_id, norm_hash, before_id),
+        ).fetchone()
+        return int(row["message_id"]) if row else None
+
+    def entity_ranked(self, user_id: str, session_id: str, ents: list[str], k: int,
+                      max_df: Optional[int] = None) -> list[int]:
+        """Messages mentioning the most query entities (rarest entities weigh most).
+
+        Entities found in more than ``max_df`` messages (e.g. the user's own
+        name in a transcript) say nothing about relevance and are ignored.
+        """
+        if not ents:
+            return []
+        having = f" HAVING COUNT(*) <= {int(max_df)}" if max_df else ""
+        q = (
+            "SELECT e.message_id AS id, SUM(1.0 / df.n) AS score FROM entities e "
+            "JOIN (SELECT entity, COUNT(*) AS n FROM entities WHERE user_id = ? AND session_id = ? "
+            f"AND entity IN ({','.join('?' * len(ents))}) GROUP BY entity{having}) df ON df.entity = e.entity "
+            "WHERE e.user_id = ? AND e.session_id = ? "
+            "GROUP BY e.message_id ORDER BY score DESC, e.message_id DESC LIMIT ?"
+        )
+        rows = self.conn.execute(q, (user_id, session_id, *ents, user_id, session_id, k))
+        return [int(r["id"]) for r in rows]
+
+    def time_ranked(self, user_id: str, session_id: str, ranges: list[tuple[float, float]], k: int) -> list[int]:
+        """Messages sent in, or talking about, any of the given time ranges."""
+        ids: list[int] = []
+        for a, b in ranges:
+            rows = self.conn.execute(
+                "SELECT id FROM (SELECT id FROM messages WHERE user_id = ? AND session_id = ? "
+                "AND created_at BETWEEN ? AND ? UNION SELECT message_id AS id FROM times "
+                "WHERE user_id = ? AND session_id = ? AND t_start <= ? AND t_end >= ?) "
+                "ORDER BY id DESC LIMIT ?",
+                (user_id, session_id, a, b, user_id, session_id, b, a, k),
+            )
+            ids += [int(r["id"]) for r in rows]
+        seen: set[int] = set()
+        return [i for i in ids if not (i in seen or seen.add(i))][:k]
+
+    def neighbors(self, user_id: str, session_id: str, ids: list[int], span: int = 1) -> dict[int, list[int]]:
+        """For each id, the ids of the ``span`` turns before and after it."""
+        out: dict[int, list[int]] = {}
+        for i in ids:
+            rows = self.conn.execute(
+                "SELECT id FROM (SELECT id FROM messages WHERE user_id = ? AND session_id = ? AND id < ? "
+                "ORDER BY id DESC LIMIT ?) UNION SELECT id FROM (SELECT id FROM messages WHERE "
+                "user_id = ? AND session_id = ? AND id > ? ORDER BY id LIMIT ?)",
+                (user_id, session_id, i, span, user_id, session_id, i, span),
+            )
+            out[i] = [int(r["id"]) for r in rows]
+        return out
+
+    # -- vectors -----------------------------------------------------------
+
+    def add_vector(self, msg_id: int, user_id: str, session_id: str, vec: bytes, commit: bool = True) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO vectors (message_id, user_id, session_id, vec) VALUES (?, ?, ?, ?)",
+            (msg_id, user_id, session_id, vec),
+        )
+        if commit:
+            self.conn.commit()
+
+    def vectors(self, user_id: str, session_id: str) -> list[tuple[int, bytes]]:
+        rows = self.conn.execute(
+            "SELECT message_id, vec FROM vectors WHERE user_id = ? AND session_id = ? ORDER BY message_id",
+            (user_id, session_id),
+        )
+        return [(int(r[0]), r[1]) for r in rows]
+
+    # -- slots (structured facts with validity windows) --------------------
+
+    def current_slots(self, user_id: str, subject: Optional[str] = None,
+                      attribute: Optional[str] = None) -> list[dict]:
+        sql = "SELECT * FROM slots WHERE user_id = ? AND valid_to IS NULL"
+        params: list = [user_id]
+        if subject is not None:
+            sql += " AND subject = ?"
+            params.append(subject)
+        if attribute is not None:
+            sql += " AND attribute = ?"
+            params.append(attribute)
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY id", params)]
+
+    def slot_history(self, user_id: str) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM slots WHERE user_id = ? ORDER BY id", (user_id,))]
+
+    def add_slot(self, user_id: str, subject: str, attribute: str, value: str, multi: bool,
+                 valid_from: float, source_message_id: Optional[int], commit: bool = True) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO slots (user_id, subject, attribute, value, multi, valid_from, source_message_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, subject, attribute, value, int(multi), valid_from, source_message_id),
+        )
+        if commit:
+            self.conn.commit()
+        return int(cur.lastrowid)
+
+    def close_slot(self, slot_id: int, valid_to: float, closed_by: Optional[int], commit: bool = True) -> None:
+        self.conn.execute("UPDATE slots SET valid_to = ?, closed_by = ? WHERE id = ?",
+                          (valid_to, closed_by, slot_id))
+        if commit:
+            self.conn.commit()
+
+    def slots_from_messages(self, user_id: str, ids: list[int]) -> dict[int, list[dict]]:
+        out: dict[int, list[dict]] = {}
+        for chunk in _chunks(ids):
+            q = (f"SELECT * FROM slots WHERE user_id = ? AND source_message_id IN "
+                 f"({','.join('?' * len(chunk))})")
+            for r in self.conn.execute(q, (user_id, *chunk)):
+                out.setdefault(r["source_message_id"], []).append(dict(r))
+        return out
+
+    def commit(self) -> None:
+        self.conn.commit()
 
     def count_messages(self, user_id: str, session_id: str) -> int:
         row = self.conn.execute(
