@@ -63,3 +63,58 @@ Step 7 held-out check: tuned weights also win on each half of LoCoMo separately
 (conversations 0-4: R@5 55.5 -> 59.4 vs old Model2Vec settings; conversations 5-9:
 52.3 -> 57.9), so the gain is not an artefact of tuning on all ten. Model2Vec
 writes run at ~1,500 msg/s (one embedding per message) vs ~4,000 msg/s keyword only.
+
+## LongMemEval (step 9)
+
+Step 9 adds `longmemeval_bench.py` as a second retrieval benchmark, so later
+changes are not tuned to LoCoMo alone. No defaults were changed for it: these
+are the step 8 defaults, measured as they are. All 470 answerable questions of
+`longmemeval_s` (231,606 turns in total, one fresh NoMem per question),
+1,000-token context, `ApproxCounter`, each question asked at its own date.
+"Session R@k" = share of evidence sessions among the top-k sessions; "all@5" =
+questions with every evidence session in the top 5; "turn R@k" = share of
+evidence turns among the top-k turns; "ctx" = evidence turn text in the final
+context.
+
+| Config | Session R@5 | Session R@10 | all@5 | Turn R@5 | Turn R@10 | ctx | search p50 | add p50 / p95 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Keyword only | 89.9 | 94.7 | 82.1 | 52.7 | 74.5 | 41.1 | 6.9 ms | 1.8 / 12.4 ms |
+| + Model2Vec potion-base-8M | **92.1** | **95.8** | **85.1** | **55.9** | **77.2** | **44.5** | 11.0 ms | 2.0 / 13.4 ms |
+
+By question type (turn R@5 / ctx, keyword only -> + Model2Vec):
+
+| Type | n | Session R@5 | Turn R@5 | ctx |
+| --- | --- | --- | --- | --- |
+| single-session-user | 64 | 98.4 -> 100.0 | 85.9 -> 90.6 | 78.1 -> 82.8 |
+| single-session-assistant | 56 | 100.0 -> 100.0 | 76.8 -> 76.8 | 17.9 -> 21.4 |
+| single-session-preference | 30 | 73.3 -> 73.3 | 40.0 -> 38.3 | 33.3 -> 35.0 |
+| multi-session | 121 | 83.7 -> 88.1 | 35.1 -> 39.2 | 31.4 -> 34.9 |
+| knowledge-update | 72 | 98.6 -> 99.3 | 54.2 -> 52.5 | 44.7 -> 42.6 |
+| temporal-reasoning | 127 | 86.2 -> 88.8 | 44.1 -> 51.2 | 41.7 -> 47.8 |
+
+Where NoMem is weak on LongMemEval (not fixed here, reported only):
+
+- **Context recall trails search recall by a lot** (44.5 vs turn R@10 77.2).
+  `build_context` takes only `retrieval_top_k=5` hits into a slice of 30% of
+  the budget (~300 tokens at 1,000), and LongMemEval turns are long. Worst on
+  single-session-assistant: the evidence is found (turn R@10 95) but the
+  assistant turn rarely fits (ctx 21). At a 4,000-token budget ctx only rises
+  to 50.2 (keyword only, 100-question spread), because the top-5 cap still binds.
+- **Preference questions** ("can you suggest...") are the weakest type: turn
+  R@5 38-40, session R@5 73. The evidence is something the user said about
+  themselves in other words; Model2Vec does not close the gap.
+- **Multi-session questions** need several sessions at once: only 64.5%
+  (72% with vectors) get every evidence session into the top 5, and turn R@5
+  is 35-39.
+- **Temporal-reasoning** turn R@5 is 44-51; vectors help most here (+7).
+- **Writes on long turns are slow.** Ingest runs at ~200 turns/s here vs
+  ~3,000 msg/s on short synthetic chat (add p95 12-13 ms). Profiling 3
+  haystacks: contradiction detection is ~55% of `add()` time on long turns
+  (`conflicts.sentence_values` / `clause_values`), then annotation (date
+  parsing, simhash).
+- **A crash, now fixed:** `add()` raised `ValueError` on text like "Rome was
+  founded 4000 years ago" (the year left datetime's range). Out-of-range
+  relative dates are now skipped.
+
+LoCoMo, stress, invariants and the updated-facts benchmark are unchanged by
+step 9 (same numbers as step 8, with and without Model2Vec).

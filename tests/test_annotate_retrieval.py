@@ -34,6 +34,13 @@ def test_relative_and_absolute_dates_resolve_against_message_time():
     assert days("no dates here") == []
 
 
+def test_out_of_range_relative_dates_are_skipped_not_raised():
+    # Found by LongMemEval: a history chat about antiquity crashed add().
+    assert A.parse_times("Rome was founded 4000 years ago", REF) == []
+    assert A.parse_times("99999999999 days ago", REF) == []
+    mk().add("user", "The pyramids were built about 4500 years ago.")
+
+
 def test_slots_are_conservative_first_person_facts():
     s = {(x.attribute, x.value, x.negated) for x in A.extract_slots(
         "My name is Saswat and I live in Bangalore. I'm severely allergic to peanuts.")}

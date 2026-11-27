@@ -226,12 +226,18 @@ offline use and tests.
 Measured without any LLM (`python benchmarks/run_all.py`; details and every
 step in [`benchmarks/TRAJECTORY.md`](benchmarks/TRAJECTORY.md)). LoCoMo: did
 the evidence turn for each of 1,531 answerable questions land in the top-5
-search results, and in a 1,000-token context?
+search results, and in a 1,000-token context? LongMemEval (`longmemeval_s`,
+470 answerable questions, each over its own ~500-turn history): did the
+evidence session land in the top 5 sessions, and the evidence turn in the
+top 5 turns and the 1,000-token context?
 
 | | v0.1 (FTS5 only) | v0.2 (hybrid, LLM-free) | v0.2 + Model2Vec |
 | --- | --- | --- | --- |
 | LoCoMo search recall@5 | 50.9% | 56.8% | 58.6% |
 | LoCoMo context recall | 52.5% | 57.6% | 59.7% |
+| LongMemEval session recall@5 | | 89.9% | 92.1% |
+| LongMemEval turn recall@5 | | 52.7% | 55.9% |
+| LongMemEval context recall | | 41.1% | 44.5% |
 | Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
 | Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
 | Updated facts flagged, held-out (false flags) | | 16/20 (1/50) | 16/20 (1/50) |

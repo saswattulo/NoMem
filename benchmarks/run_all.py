@@ -2,8 +2,11 @@
 
 Usage:
     python benchmarks/run_all.py [--label NAME] [--quick] [--embedder model2vec|hashing|MODEL]
+                                 [--longmemeval-limit N]
 
-Runs LoCoMo retrieval, the scale/invariant stress test and the updated-facts
+Runs LoCoMo retrieval, LongMemEval retrieval (an even spread of 100 of its 470
+answerable questions by default; ``--longmemeval-limit 0`` runs all of them,
+~25 minutes), the scale/invariant stress test and the updated-facts
 (contradiction) benchmark.
 
 Writes full results to benchmarks/results/<label>.json (git-ignored).
@@ -20,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import locomo_bench  # noqa: E402
+import longmemeval_bench  # noqa: E402
 import stress  # noqa: E402
 import updates_bench  # noqa: E402
 
@@ -40,6 +44,8 @@ def main() -> None:
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--embedder", help="model2vec (potion-base-8M), hashing, or a Model2Vec model id/path")
     ap.add_argument("--vector-weight", type=float, help="override the vector ranker's RRF weight")
+    ap.add_argument("--longmemeval-limit", type=int,
+                    help="LongMemEval questions to run (default 100, 30 with --quick; 0 = all)")
     args = ap.parse_args()
 
     mem_kwargs = {}
@@ -56,6 +62,13 @@ def main() -> None:
         out["locomo"] = locomo_bench.run(mem_kwargs=mem_kwargs)
     else:
         print("(LoCoMo data missing, skipping; see benchmarks/README.md)")
+    if longmemeval_bench.DEFAULT_DATA.exists():
+        limit = args.longmemeval_limit
+        if limit is None:
+            limit = 30 if args.quick else 100
+        out["longmemeval"] = longmemeval_bench.run(limit=limit or None, mem_kwargs=mem_kwargs)
+    else:
+        print("(LongMemEval data missing, skipping; see benchmarks/README.md)")
     out["stress"] = stress.run(args.quick, mem_kwargs=mem_kwargs)
     out["updates"] = updates_bench.run(mem_kwargs=mem_kwargs)
 
@@ -70,6 +83,16 @@ def main() -> None:
         for cat, d in lo["by_category"].items():
             print(f"  {cat:<12} R@5 {d['r@5']:>5}  R@10 {d['r@10']:>5}  ctx {d['ctx']:>5}")
         print(f"  latency ms: {lo['latency_ms']}  avg ctx tokens {lo['avg_context_tokens']}")
+    if "longmemeval" in out:
+        lm = out["longmemeval"]
+        o = lm["overall"]
+        print(f"LongMemEval ({lm['questions']} q, {lm['turns_ingested']} turns, {lm['budget']} tok): "
+              f"session R@5 {o['session r@5']}  all@5 {o['session all@5']}  "
+              f"turn R@5 {o['turn r@5']}  R@10 {o['turn r@10']}  context recall {o['ctx']}")
+        for t, d in lm["by_type"].items():
+            print(f"  {t:<26} n {d['n']:>3}  sess R@5 {d['session r@5']:>5}  "
+                  f"turn R@5 {d['turn r@5']:>5}  R@10 {d['turn r@10']:>5}  ctx {d['ctx']:>5}")
+        print(f"  latency ms: {lm['latency_ms']}  avg ctx tokens {lm['avg_context_tokens']}")
     for s in out["stress"]["scale"]:
         print(f"scale {s['messages']:>6}: ingest {s['ingest_msgs_per_s']}/s  "
               f"query p50 {s['query_p50_ms']}ms p95 {s['query_p95_ms']}ms  planted {s['planted_recall']}")
