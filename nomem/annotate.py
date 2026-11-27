@@ -185,7 +185,10 @@ def parse_times(text: str, ref: float) -> list[tuple[float, float]]:
     num = r"(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|couple of|couple|several)"
     for n, unit in re.findall(rf"\b{num}\s+{_UNIT_RE}\s+ago\b", t):
         k = int(n) if n.isdigit() else _NUMWORDS[n]
-        out.append(_span(unit, _shift(now, unit, -k)))
+        try:
+            out.append(_span(unit, _shift(now, unit, -k)))
+        except (ValueError, OverflowError, OSError):
+            continue  # "4000 years ago": outside what datetime can represent
 
     for which, unit in re.findall(rf"\b(last|this|next|past)\s+{_UNIT_RE}\b", t):
         k = {"last": -1, "past": -1, "this": 0, "next": 1}[which]
