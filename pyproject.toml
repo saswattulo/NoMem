@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nomem"
-version = "0.1.0"
-description = "Not Only Memory — a transparent, token-budgeted memory layer for agentic and RAG applications."
+version = "0.2.0"
+description = "Not Only Memory — a transparent, token-budgeted, LLM-free memory layer for agentic and RAG applications."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

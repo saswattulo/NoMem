@@ -155,8 +155,8 @@ class Retriever:
 SLOT_SYNONYMS = {
     "name": {"name", "called"},
     "age": {"age", "old", "birthday"},
-    "location": {"live", "living", "lives", "location", "city", "based", "moved"},
-    "job": {"job", "work", "occupation", "profession", "career", "do for a living"},
+    "location": {"live", "lives", "location", "city", "based", "moved"},
+    "job": {"job", "work", "occupation", "profession", "career", "living"},
     "employer": {"work", "employer", "company", "job"},
     "diet": {"diet", "eat", "vegetarian", "vegan", "food"},
     "allergy": {"allergy", "allergic", "allergies"},

@@ -1,14 +1,17 @@
 # NoMem — Not Only Memory
 
 A transparent, token-budgeted **memory layer for agentic and RAG applications**.
-Framework-neutral core, local-first (SQLite), and — by design — **no LLM, no API
-key, and no model download required** to get started.
+Framework-neutral core, local-first (SQLite), and — by design — **no LLM
+anywhere in the pipeline**: no API key, no model download, no per-message
+model calls. Memory is stored verbatim, indexed with deterministic rules, and
+assembled at read time.
 
 > Context engineering is the real bottleneck for agents: overflowing windows,
 > incoherent long conversations, and black-box "memory" you can't inspect.
 > NoMem gives you a hard token budget and a full audit trail of every decision.
 
-**Status:** `v0.1` — Milestones 1–2 (core engine + archival retrieval). See the [roadmap](#roadmap).
+**Status:** `v0.2` — Milestones 1–3 (core engine, hybrid retrieval, LLM-free
+facts and compaction). See the [roadmap](#roadmap) and [benchmarks](#benchmarks).
 
 ## Why NoMem
 
@@ -16,7 +19,12 @@ key, and no model download required** to get started.
   manual counting or overflow errors.
 - **Fully transparent.** Every message kept, dropped, retrieved, or summarised
   is logged with the reason and the token cost. No black boxes.
-- **Three memory tiers.** Core (fixed persona/facts) → Working (recent
+- **No LLM in the memory layer.** Tools like mem0, Zep and Letta call an LLM on
+  every write to extract, merge and summarise memories. NoMem replaces each of
+  those jobs with rules, hashes and ranking, so writes take well under a
+  millisecond and cost nothing, and every memory is something that was
+  actually said.
+- **Three memory tiers.** Core (persona + known facts) → Working (recent
   conversation) → Archival (everything, retrieved on demand).
 - **Lightweight & local-first.** One SQLite file. Zero required dependencies.
   Runs offline in seconds.
@@ -29,6 +37,7 @@ key, and no model download required** to get started.
 pip install nomem            # core: zero dependencies
 pip install nomem[openai]    # exact local token counts via tiktoken
 pip install nomem[anthropic] # exact token counts via the Anthropic API
+pip install nomem[embed]     # optional vector retrieval (Model2Vec, CPU-only)
 ```
 
 *(Pre-release: install from source with `pip install -e .`)*
@@ -62,54 +71,104 @@ the fuller demo (`python examples/basic_usage.py`), where the budget forces
 drops and retrieval pulls an already-dropped fact back in:
 
 ```
-context: 98/120 tokens, 5 messages
-----------------------------------
+context: 102/120 tokens, 5 messages
+-----------------------------------
 core             core         15t [105 left]  included fixed core memory
-retrieved        archival     27t [4 left]  user message #3 (relevance match)
-skipped          archival      0t [4 left]  user message #5 (already in the recent window)
-skipped          archival      0t [4 left]  user message #7 (already in the recent window)
-retrieval        archival     27t [4 left]  retrieved 1 of 3 match(es) for query
-added            working      16t [62 left]  user message #7
-added            working      22t [40 left]  assistant message #6
-added            working      18t [22 left]  user message #5
-dropped          working      24t [22 left]  assistant message #4 (needs 24, 22 left)
-dropped          working      17t [22 left]  assistant message #2 (needs 17, 22 left)
-dropped          working      14t [22 left]  user message #1 (needs 14, 22 left)
-budget_exhausted working       0t [22 left]  3 older message(s) dropped to fit the budget
+retrieved        archival     31t [0 left]  user message #3 (matched by keyword#1)
+skipped          archival      0t [0 left]  user message #7 (already in the recent window)
+skipped          archival      0t [0 left]  user message #5 (already in the recent window)
+skipped          archival      0t [0 left]  assistant message #6 (already in the recent window)
+dropped          archival     24t [0 left]  assistant message #4 (would exceed 31-tok archival budget)
+retrieval        archival     31t [0 left]  retrieved 1 of 5 match(es) for query
+added            working      16t [58 left]  user message #7
+added            working      22t [36 left]  assistant message #6
+added            working      18t [18 left]  user message #5
+dropped          working      24t [18 left]  assistant message #4 (needs 24, 18 left)
+dropped          working      17t [18 left]  assistant message #2 (needs 17, 18 left)
+dropped          working      14t [18 left]  user message #1 (needs 14, 18 left)
+budget_exhausted working       0t [18 left]  3 older message(s) dropped to fit the budget
 ```
 
 (Exact token numbers depend on the `TokenCounter` in use.)
 
 ## The three tiers
 
-| Tier         | What it holds                                   | Storage                       | Scope                |
-| ------------ | ----------------------------------------------- | ----------------------------- | -------------------- |
-| **Core**     | Fixed persona/rules + durable user facts        | `facts` table                 | `user_id`            |
-| **Working**  | Recent conversation (budget-enforced window)    | `messages` (+ rolling summary)| `user_id`+`session_id`|
-| **Archival** | Every message, retrieved on demand              | `messages` + FTS5             | `user_id`+`session_id`|
+| Tier         | What it holds                                              | Storage                          | Scope                 |
+| ------------ | ---------------------------------------------------------- | -------------------------------- | --------------------- |
+| **Core**     | Fixed persona/rules + a "Known facts" card                 | `slots` + `facts` tables         | `user_id`             |
+| **Working**  | Recent conversation (budget-enforced window)               | `messages` (+ optional summary)  | `user_id`+`session_id`|
+| **Archival** | Every message, verbatim, retrieved on demand               | `messages` + FTS5 + annotations  | `user_id`+`session_id`|
 
-Everything lives in one local SQLite file (or `:memory:`). Archival retrieval
-uses SQLite's built-in **FTS5** keyword search — no embedding model needed.
+Everything lives in one local SQLite file (or `:memory:`).
 
-### Retrieval
+## How it works without an LLM
 
-Pass a `query` to `build_context(query=...)` and NoMem pulls older, relevant
-messages back into context — even ones the sliding window already dropped:
+**Write path: store verbatim, annotate with rules.** `add()` stores the message
+exactly as written, then attaches deterministic annotations beside it:
+entities, keyphrases, resolved dates ("yesterday", "two weeks ago",
+"7 May 2023", anchored to the message's own timestamp), an importance score,
+duplicate hashes, and first-person **slot facts** such as
+`location = Berlin` or `allergy = peanuts`. A new value for a single-valued
+slot closes the old one (`valid_to`, `closed_by`) instead of deleting it, so
+history is kept. Pass `timestamp=` to import an existing transcript.
+
+**Read path: decide at query time.** `build_context(query=...)` assembles, in
+one hard budget:
+
+1. **Core** persona, then a **Known facts** card with the slot facts the query
+   asks about (`facts_ratio`, default 10% of the budget). Ask "what do I do
+   for a living?" and it finds `job: backend engineer` with no shared keyword.
+2. **Retrieved memories**, each shown with its date. Several rankers propose
+   candidates and Reciprocal Rank Fusion merges them: FTS5 BM25 keywords,
+   entities (ignoring ones that appear everywhere), dates in the question,
+   slot facts, optional vectors, and the turns either side of a strong hit.
+   An importance prior re-orders the result and duplicates are collapsed.
+   A memory whose fact was later superseded says so:
+   `I live in Pune. (superseded: location changed on 20 Mar 2026; now Bangalore)`.
+3. **Recent conversation**, newest first, as a contiguous window.
+4. Optionally, an **extractive summary** of turns that just fell out of the
+   window (`summary_ratio`, off by default): the most informative sentences,
+   quoted with dates, never paraphrased.
+
+`result.explain()` shows every decision, including which rankers found each
+memory (`matched by keyword#1, entity#1, slot#1`).
+
+| Knob | Default | What it does |
+| --- | --- | --- |
+| `retrieval_top_k` | 5 | Memories considered per query |
+| `archival_ratio` | 0.3 | Budget share reserved for retrieved memories (unused rolls over) |
+| `facts_ratio` | 0.1 | Most the Known-facts card may use (unused rolls over) |
+| `summary_ratio` | 0.0 | Budget share for the extractive summary (off by default) |
+| `retrieval` | `RetrievalConfig()` | Ranker weights, RRF k, importance and recency priors |
+| `annotate` | `True` | Rule-based annotation on write |
+| `embedder` | `None` | Optional vector ranker |
 
 ```python
-mem.add_user("Important: I'm severely allergic to peanuts.")
-# ... many turns later, the allergy has slid out of the window ...
-result = mem.build_context(query="what snacks are safe given my peanut allergy?")
-# -> the allergy fact is retrieved and re-inserted, and the log shows why
+mem.add_user("I live in Pune.")
+mem.add_user("I moved to Bangalore last week!")
+mem.facts()          # current facts: location = Bangalore
+mem.fact_history()   # Pune too, with when it stopped being true
+mem.search_hits("where did I live before?")  # hits with scores and reasons
+mem.remember("preferred name", "Sas")         # pin a fact yourself
 ```
 
-Two knobs (sensible defaults): `retrieval_top_k` (how many matches to consider,
-default 5) and `archival_ratio` (fraction of the budget reserved for retrieved
-memories, default `0.3`; unused reservation rolls over to recent conversation).
-Messages still inside the recent window are never duplicated or relocated into
-the retrieved block — the log shows them as `skipped`.
-Retrieval is keyword-based in v0.1 — semantic/vector retrieval is a later
-upgrade behind the same interface. See `examples/retrieval_demo.py`.
+See `examples/facts_demo.py` and `examples/retrieval_demo.py`.
+
+### Optional vectors
+
+The core is model-free. For semantic matching, pass an embedder (an
+embedding model, never a generative one):
+
+```python
+from nomem import NoMem, Model2VecEmbedder
+mem = NoMem(embedder=Model2VecEmbedder())  # minishlab/potion-base-8M by default
+```
+
+`Model2VecEmbedder` is the recommended default: ~8M parameters, CPU-only,
+fast enough to embed every message on write. `SentenceTransformerEmbedder`
+takes any sentence-transformers model; subclass `Embedder` for anything
+else. `HashingEmbedder` (character n-grams, no model) exists for offline use
+and tests; it catches typos but does not improve LoCoMo retrieval.
 
 ## Design choices
 
@@ -125,17 +184,35 @@ upgrade behind the same interface. See `examples/retrieval_demo.py`.
 - **Local-first, expandable.** SQLite today; in-memory and vector-DB backends
   behind the same store interface later.
 
+## Benchmarks
+
+Measured without any LLM (`python benchmarks/run_all.py`; details and every
+step in [`benchmarks/TRAJECTORY.md`](benchmarks/TRAJECTORY.md)). LoCoMo: did
+the evidence turn for each of 1,531 answerable questions land in the top-5
+search results, and in a 1,000-token context?
+
+| | v0.1 (FTS5 only) | v0.2 (hybrid, LLM-free) |
+| --- | --- | --- |
+| LoCoMo search recall@5 | 50.9% | 56.4% |
+| LoCoMo context recall | 52.5% | 57.3% |
+| Query latency at 50k messages | 190 ms | 2.6 ms |
+| Planted facts recalled at 50k messages | 7/8 | 8/8 |
+| Write cost | 0 model calls | 0 model calls |
+
 ## Roadmap
 
 - **M1 — Core engine** ✅ Token-budgeted working memory, SQLite persistence,
   user/session scoping, full transparency log.
-- **M2 — Archival retrieval** ✅ FTS5 keyword search wired into `build_context`;
-  relevant past messages pulled back in when the budget allows, every retrieval
-  trade-off logged.
-- **M3 — Rule-based compaction** Extractive summariser + facts extraction into
-  the core tier; rolling summaries in working memory.
+- **M2 — Archival retrieval** ✅ FTS5 keyword search wired into `build_context`.
+- **M3 — LLM-free memory** ✅ Rule-based annotations (entities, dates,
+  keyphrases, importance), bi-temporal slot facts with supersession, hybrid
+  retrieval with RRF, a Known-facts card, an extractive compactor, optional
+  embedders, and a benchmark harness.
 - **M4 — Adapters & polish** LangChain `BaseMemory` adapter, tool-output
-  isolation helper, long-conversation tests, demo notebook.
+  isolation helper, demo notebook.
+- **M5 — Optional encoders** GLiNER entities and a co-occurrence graph with
+  Personalized PageRank, cross-encoder reranking (`nomem[ner]`,
+  `nomem[rerank]`), pluggable pattern packs for other languages.
 
 ## Development
 

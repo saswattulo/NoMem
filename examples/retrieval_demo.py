@@ -3,9 +3,9 @@
 An important detail is mentioned early, buried under later chit-chat, then
 pulled back into context on demand when a query matches it.
 
-Note: v0.1 retrieval is SQLite FTS5 *keyword* search, so the query has to
-share a term with the stored fact (here, "peanut"). Semantic retrieval is a
-later upgrade behind the same interface.
+Retrieval is hybrid and LLM-free: FTS5 keyword search fused with entity,
+date, slot-fact and neighbouring-turn rankers (plus vectors if you pass an
+embedder). The log shows which rankers found each memory.
 
 Run it:  python examples/retrieval_demo.py   (no API key, no model download)
 """

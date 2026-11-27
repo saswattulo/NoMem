@@ -465,6 +465,9 @@ class NoMem:
             who = "" if r["subject"] == "user" else f"{r['subject']} "
             lines.append(f"- {who}{r['attribute'].replace('_', ' ')}: {r['value']} "
                          f"(since {_date(r['valid_from'])})")
+        if not lines:
+            log.append(LogEntry("skipped", "core", "state card: no stored fact matches the query", 0, cap))
+            return None, 0
         head = "Known facts:"
         kept: list[str] = []
         cost = 0
