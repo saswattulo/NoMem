@@ -181,10 +181,14 @@ neighbours add candidates and raise confidence. Tune or turn it off with
 `NoMem(conflicts=ConflictConfig(...))`.
 
 The rules aim for precision: on real LoCoMo chat they flag 2 pairs in 5,882
-turns. On the updated-facts benchmark they find 40/40 of the cases they
-were tuned on and 16/20 held-out ones, with 1 false flag in 50 look-alike
-controls. Misses are mostly changes with no number, time or name
-("I commute by train now instead") and plural mismatches ("1 dog" / "2 dogs").
+turns. On a fresh held-out set of 25 updates and 25 look-alike controls,
+written before the latest rule changes and never tuned on, they catch 19/25
+with 0 false flags. Topic words match across singular and plural, weekday
+schedules ("on Tuesdays") are compared by name, and a short plain statement
+whose wording changes after a strong cue ("my commute is by car" ... "I
+commute by train now instead") counts too. Still missed: numbers written as
+words ("two cars"), ordinals ("the 7th floor"), and brand names in lower
+camel case ("iPhone").
 
 ### Optional vectors
 
@@ -237,10 +241,10 @@ top 5 turns and the 1,000-token context?
 | LoCoMo context recall | 52.5% | 57.6% | 59.7% |
 | LongMemEval session recall@5 | | 89.9% | 92.1% |
 | LongMemEval turn recall@5 | | 52.7% | 55.9% |
-| LongMemEval context recall | | 41.1% | 44.5% |
+| LongMemEval context recall | | 41.1% | 44.2% |
 | Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
 | Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
-| Updated facts flagged, held-out (false flags) | | 16/20 (1/50) | 16/20 (1/50) |
+| Updated facts caught, fresh held-out (false flags) | | 19/25 (0/25) | 19/25 (0/25) |
 | Write throughput | | ~4,000 msg/s | ~1,500 msg/s |
 | Write cost | 0 model calls | 0 model calls | 1 embedding (no generative model) |
 
@@ -253,7 +257,7 @@ top 5 turns and the 1,000-token context?
   keyphrases, importance), bi-temporal slot facts with supersession, hybrid
   retrieval with RRF, a Known-facts card, an extractive compactor, optional
   embedders, and a benchmark harness.
-- **M3.5 — Contradictions** ✅ Slot, frame and update-cue conflict detection;
+- **M3.5 — Contradictions** ✅ Slot, frame, update-cue and wording-change conflict detection;
   both memories surfaced with dates and a conflict marker; updated-facts
   benchmark.
 - **M4 — Adapters & polish** LangChain `BaseMemory` adapter, tool-output

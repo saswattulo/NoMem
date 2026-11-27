@@ -99,7 +99,7 @@ def main() -> None:
     inv = out["stress"]["invariants"]
     print(f"invariants: {inv['invariant_trials']} trials, {inv['violations']} violations")
     up = out["updates"]
-    for name in ("tuned", "heldout"):
+    for name in ("tuned", "dev", "heldout"):
         u = up[name]
         print(f"updated facts ({name}): detected {u['detected']}/{u['updates']}  "
               f"both surfaced {u['both_surfaced']}%  false flags {u['false_flags']}/{u['controls']}")

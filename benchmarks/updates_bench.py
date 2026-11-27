@@ -157,6 +157,65 @@ HELDOUT_CONTROLS = [
     ("My first marathon took 4 hours.", "My second marathon took 3 hours 50 minutes."),
 ]
 
+# Fresh held-out set, written before the second round of rule changes
+# (plurals, weekday plans, value-less changes) and never tuned on. The set
+# above became a development set once its misses were fixed.
+HELDOUT2_UPDATES = [
+    ("I take the bus to university.", "I cycle to university now instead.", "how do I get to university?", "bus", "cycle"),
+    ("My standup is on Mondays at 9am.", "Standup moved to Tuesdays.", "when is my standup?", "Monday", "Tuesday"),
+    ("I own one car.", "I own two cars now.", "how many cars do I own?", "one car", "two cars"),
+    ("My go-to drink is tea.", "My go-to drink is coffee these days.", "what do I drink?", "tea", "coffee"),
+    ("The farmers market is on Saturday.", "The farmers market switched to Sunday.", "when is the farmers market?", "Saturday", "Sunday"),
+    ("I use an iPhone.", "I switched to an Android phone, I use a Pixel now.", "what phone do I use?", "iPhone", "Pixel"),
+    ("Our team has 6 engineers.", "Our team has 9 engineers now after hiring.", "how big is our team?", "6", "9"),
+    ("I get paid monthly.", "I get paid weekly now.", "how often am I paid?", "monthly", "weekly"),
+    ("My parents live in Chennai.", "My parents moved to Mysore.", "where do my parents live?", "Chennai", "Mysore"),
+    ("Swimming lessons are on Thursday afternoons.", "Swimming lessons are on Friday afternoons from now on.", "when are swimming lessons?", "Thursday", "Friday"),
+    ("I work from the office.", "I work from home now.", "where do I work from?", "office", "home"),
+    ("The rent is due on the 1st.", "The rent is now due on the 5th.", "when is rent due?", "1st", "5th"),
+    ("My partner's name is Alex.", "Actually my partner's name is Alexis, Alex is a nickname.", "what is my partner's name?", "Alex", "Alexis"),
+    ("I have one sibling.", "I have two siblings, I found out about a half-brother.", "how many siblings do I have?", "one sibling", "two siblings"),
+    ("My preferred editor is Vim.", "My preferred editor is VS Code now.", "what editor do I use?", "Vim", "VS Code"),
+    ("I shop at Tesco.", "I shop at Aldi now, it's cheaper.", "where do I shop?", "Tesco", "Aldi"),
+    ("The dinner reservation is for 4 people.", "The dinner reservation is for 6 people now.", "how many people is the reservation for?", "4", "6"),
+    ("My laptop runs Windows.", "My laptop runs Linux now.", "what does my laptop run?", "Windows", "Linux"),
+    ("I water the plants every Sunday.", "I water the plants every Wednesday now.", "when do I water the plants?", "Sunday", "Wednesday"),
+    ("I usually wake up at 7am.", "I wake up at 5:30am now for training.", "when do I wake up?", "7am", "5:30"),
+    ("My hair is long.", "My hair is short now, I cut it.", "how is my hair?", "long", "short"),
+    ("Grandma's surgery is on 3 December.", "Grandma's surgery was moved to 10 December.", "when is grandma's surgery?", "3 December", "10 December"),
+    ("We have two cats.", "We have three cats now.", "how many cats do we have?", "two cats", "three cats"),
+    ("My office is on the 3rd floor.", "My office moved to the 7th floor.", "which floor is my office?", "3rd", "7th"),
+    ("The newsletter goes out on Tuesday.", "The newsletter goes out on Thursday now.", "when does the newsletter go out?", "Tuesday", "Thursday"),
+]
+
+HELDOUT2_CONTROLS = [
+    ("I take the bus to university.", "My roommate cycles to university."),
+    ("My standup is on Mondays at 9am.", "My retro is on Fridays at 4pm."),
+    ("I own one car.", "My parents own two cars."),
+    ("I drank tea this morning.", "I drank coffee this afternoon."),
+    ("The farmers market is on Saturday.", "The flea market is on Sunday."),
+    ("I work from the office on Mondays.", "I work from home on Fridays."),
+    ("My hair is long.", "My sister's hair is short now."),
+    ("I water the plants every Sunday.", "I clean the bathroom every Wednesday."),
+    ("I woke up at 7am today.", "I woke up at 9am yesterday."),
+    ("We have two cats.", "Our friends have three dogs now."),
+    ("I shop at Tesco for groceries.", "I shop at Ikea for furniture."),
+    ("My laptop runs Windows.", "My work desktop runs Linux."),
+    ("I visited Chennai in 2020.", "Now I'm visiting Mysore for the weekend."),
+    ("The rent is due on the 1st.", "The electricity bill is due on the 15th."),
+    ("I used Vim for this project.", "For the website I used VS Code."),
+    ("I ate pasta on Monday.", "I ate curry on Tuesday."),
+    ("My office is on the 3rd floor.", "The cafeteria is on the 1st floor."),
+    ("I have one sibling.", "My husband has four siblings."),
+    ("I read the news in the morning.", "I read novels in the evening."),
+    ("The team lunch was at Wagamama.", "The client dinner was at Hawksmoor."),
+    ("I'm learning Python.", "I'm also learning Go now."),
+    ("My bus pass costs 60 pounds.", "My gym membership costs 40 pounds."),
+    ("The dinner reservation is for 4 people.", "The lunch booking is for 2 people."),
+    ("I prefer window seats on trains.", "I prefer aisle seats on planes."),
+    ("I cycled 20 km on Saturday.", "I cycled 35 km on Sunday."),
+]
+
 FILLER = [
     "That sounds fun, tell me more.", "Haha yes, totally agree.", "The weather was lovely today.",
     "I watched a documentary about whales.", "Did you try the new recipe?", "Work has been busy lately.",
@@ -196,7 +255,8 @@ def _linked(mem: NoMem, a, b) -> list[dict]:
 def run(mem_kwargs=None, verbose: bool = False, locomo: bool = True) -> dict:
     mem_kwargs = mem_kwargs or {}
     out = {"tuned": evaluate(UPDATES, CONTROLS, mem_kwargs, verbose),
-           "heldout": evaluate(HELDOUT_UPDATES, HELDOUT_CONTROLS, mem_kwargs, verbose)}
+           "dev": evaluate(HELDOUT_UPDATES, HELDOUT_CONTROLS, mem_kwargs, verbose),
+           "heldout": evaluate(HELDOUT2_UPDATES, HELDOUT2_CONTROLS, mem_kwargs, verbose)}
     if locomo:
         out["locomo"] = locomo_flags(mem_kwargs, verbose)
     return out
