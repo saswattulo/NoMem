@@ -118,7 +118,11 @@ class NoMem:
 
         # One read of the session's messages serves both the retrieval
         # exclusion probe and the final window fill.
-        recent = self.store.recent_messages(self.user_id, self.session_id)
+        # Only the newest messages can ever fit, so never read more than the
+        # most the budget could hold (+1 to see the first one that doesn't).
+        recent = self.store.recent_messages(
+            self.user_id, self.session_id, limit=self._window_limit()
+        )
 
         # 2. Archival retrieval — pull older, relevant messages back into
         #    context, up to a reserved slice of the remaining budget.
@@ -138,6 +142,10 @@ class NoMem:
         # 3. Working memory — recent messages fill the remaining budget,
         #    newest first, skipping anything retrieval already surfaced.
         kept = self._fill_working(recent, budget, retrieved_ids, log)
+        unread = self.message_count() - len(recent) if len(recent) == self._window_limit() else 0
+        if unread > 0:
+            log.append(LogEntry("budget_exhausted", "working",
+                f"{unread} older message(s) not read: they cannot fit the budget", 0, None))
         for m in kept:
             used += m.tokens if m.tokens is not None else self.counter.count_message(m.role, m.content)
         messages.extend(m.as_dict() for m in kept)
@@ -233,6 +241,10 @@ class NoMem:
         log.append(LogEntry("retrieval", "archival",
             f"retrieved {len(included)} of {len(candidates)} match(es) for query", used, cap - used))
         return included, {m.id for m in included}, used
+
+    def _window_limit(self) -> int:
+        smallest = max(1, self.counter.count_message("user", ""))
+        return self.max_tokens // smallest + 1
 
     def _window_ids(self, recent: list[Message], budget: int) -> set[int]:
         """Ids the recent window would hold at ``budget``.
