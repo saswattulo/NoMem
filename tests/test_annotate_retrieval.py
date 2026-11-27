@@ -153,3 +153,53 @@ def test_retrieved_memories_carry_their_date():
         mem.add_user(f"unrelated filler number {i}")
     res = mem.build_context(query="what is my puppy called?")
     assert "[8 May 2023] user: I adopted a puppy named Rex." in res.text
+
+
+# -- state card and superseded facts -----------------------------------------
+
+def test_state_card_answers_a_question_with_no_shared_keyword():
+    mem = mk(max_tokens=300)
+    mem.add_user("I work as a nurse at St Mary's hospital.", timestamp=REF)
+    for i in range(40):
+        mem.add_user(f"unrelated filler number {i}")
+    res = mem.build_context(query="what is my job?")
+    assert "Known facts:" in res.text and "job: nurse" in res.text
+    assert any(e.action == "facts" for e in res.log)
+    assert res.tokens_used <= 300
+
+
+def test_state_card_without_query_is_a_profile_and_respects_its_cap():
+    mem = mk(max_tokens=200, facts_ratio=0.2)
+    mem.remember("preferred name", "Sas")
+    for city in ["Paris", "Rome", "Oslo"]:
+        mem.add_user(f"I live in {city}.")
+    res = mem.build_context()
+    card = next(m["content"] for m in res.messages if m["content"].startswith("Known facts:"))
+    assert "preferred name: Sas" in card and "location: Oslo" in card
+    assert "Paris" not in card  # superseded values are history, not current facts
+    assert mem.counter.count_message("system", card) <= int(200 * 0.2)
+
+
+def test_facts_ratio_zero_disables_the_card():
+    mem = mk(facts_ratio=0)
+    mem.add_user("I live in Paris.")
+    assert "Known facts" not in mem.build_context().text
+
+
+def test_retrieved_superseded_fact_is_flagged_with_the_new_value():
+    if not fts():
+        pytest.skip("FTS5 not available")
+    mem = mk(max_tokens=260, facts_ratio=0)
+    mem.add_user("I live in Paris near the canal.", timestamp=REF)
+    for i in range(30):
+        mem.add_user(f"unrelated filler number {i}", timestamp=REF + 60 * i)
+    mem.add_user("I moved to Berlin.", timestamp=REF + 86400 * 30)
+    for i in range(30):
+        mem.add_user(f"more unrelated filler {i}", timestamp=REF + 86400 * 31 + i)
+    res = mem.build_context(query="the canal in Paris")
+    assert "I live in Paris near the canal. (superseded: location changed on 7 Jun 2023; now Berlin)" in res.text
+
+
+def test_invalid_facts_ratio_raises():
+    with pytest.raises(ValueError):
+        mk(facts_ratio=1.5)

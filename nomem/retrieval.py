@@ -31,7 +31,7 @@ class RetrievalConfig:
     pool: int = 50                 # candidates taken from each ranker
     rrf_k: int = 60                # Cormack et al. 2009
     weights: dict = field(default_factory=lambda: {
-        "keyword": 1.0, "entity": 0.5, "time": 0.5, "vector": 1.0, "context": 0.2,
+        "keyword": 1.0, "entity": 0.5, "time": 0.5, "vector": 1.0, "context": 0.2, "slot": 0.5,
     })
     importance_weight: float = 0.3  # final *= (1 - w/2 + w * importance)
     recency_half_life_days: Optional[float] = None  # None = no recency prior
@@ -73,6 +73,10 @@ class Retriever:
             ranges = A.parse_times(query, now)
             if ranges:
                 lists["time"] = s.time_ranked(u, sid, ranges, c.pool)
+        if w.get("slot"):
+            sl = slot_matches(s, u, query)
+            if sl:
+                lists["slot"] = [r["source_message_id"] for r in sl if r["source_message_id"]][: c.pool]
         if w.get("vector") and self.embedder is not None:
             lists["vector"] = self.embedder.search(s, u, sid, query, c.pool)
         if w.get("context") and c.context_span > 0:
@@ -135,6 +139,48 @@ class Retriever:
             if len(hits) >= k:
                 break
         return hits
+
+
+# Words in a question that point at a slot attribute.
+SLOT_SYNONYMS = {
+    "name": {"name", "called"},
+    "age": {"age", "old", "birthday"},
+    "location": {"live", "living", "lives", "location", "city", "based", "moved"},
+    "job": {"job", "work", "occupation", "profession", "career", "do for a living"},
+    "employer": {"work", "employer", "company", "job"},
+    "diet": {"diet", "eat", "vegetarian", "vegan", "food"},
+    "allergy": {"allergy", "allergic", "allergies"},
+    "likes": {"like", "likes", "love", "enjoy", "favorite", "favourite", "prefer"},
+    "dislikes": {"dislike", "hate", "avoid"},
+}
+
+
+def slot_matches(store, user_id: str, query: str, include_history: bool = True) -> list[dict]:
+    """Slot rows a query asks about: by attribute name/synonym or by value.
+
+    Current values come first, then superseded ones (newest first), so a
+    question about "where do I live" surfaces the latest answer and, behind
+    it, the history that explains it.
+    """
+    terms = set(A.content_terms(query)) | {w.lower() for w in A.words(query)}
+    rows = store.slot_history(user_id) if include_history else store.current_slots(user_id)
+    # Whose facts? A named subject in the question wins; otherwise "my/I"
+    # means the user; otherwise any subject.
+    subjects = {r["subject"] for r in rows}
+    named = {sub for sub in subjects if sub.lower() in terms}
+    if named:
+        rows = [r for r in rows if r["subject"] in named]
+    elif terms & {"i", "my", "me", "i'm", "mine"} and "user" in subjects:
+        rows = [r for r in rows if r["subject"] == "user"]
+    out = []
+    for r in rows:
+        attr = r["attribute"]
+        names = SLOT_SYNONYMS.get(attr, set()) | set(attr.split("_"))
+        value_terms = set(A.content_terms(r["value"]))
+        if (names & terms) or (value_terms and value_terms <= terms):
+            out.append(r)
+    out.sort(key=lambda r: (r["valid_to"] is not None, -(r["valid_from"] or 0)))
+    return out
 
 
 def _fuse(lists: dict[str, list[int]], weights: dict, rrf_k: int, scores: bool = False):

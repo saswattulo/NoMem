@@ -27,7 +27,7 @@ from typing import Optional, Union
 
 from . import annotate as A
 from .models import ContextResult, LogEntry, Message
-from .retrieval import Hit, RetrievalConfig, Retriever
+from .retrieval import Hit, RetrievalConfig, Retriever, slot_matches
 from .store import SQLiteStore
 from .tokens import TokenCounter, default_counter
 
@@ -51,6 +51,9 @@ class NoMem:
             (vector) retrieval. ``None`` keeps NoMem model-free.
         annotate: Extract entities, dates, keyphrases and slot facts on
             write (deterministic rules, no model). Default ``True``.
+        facts_ratio: Most of the post-core budget the "known facts" state
+            card may use (current slot facts + :meth:`remember` facts,
+            query-relevant first). Unused budget rolls over. ``0`` disables.
     """
 
     def __init__(
@@ -67,9 +70,12 @@ class NoMem:
         retrieval: Optional[RetrievalConfig] = None,
         embedder=None,
         annotate: bool = True,
+        facts_ratio: float = 0.1,
     ):
         if max_tokens < 1:
             raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
+        if not 0.0 <= facts_ratio <= 1.0:
+            raise ValueError(f"facts_ratio must be within [0.0, 1.0], got {facts_ratio}")
         if not 0.0 <= archival_ratio <= 1.0:
             raise ValueError(f"archival_ratio must be within [0.0, 1.0], got {archival_ratio}")
         if retrieval_top_k < 0:
@@ -85,6 +91,7 @@ class NoMem:
         self.store = db if isinstance(db, SQLiteStore) else SQLiteStore(db)
         self._log: list[LogEntry] = []
         self.annotate = annotate
+        self.facts_ratio = facts_ratio
         self.embedder = embedder
         self.retriever = Retriever(self.store, user_id, session_id, retrieval, embedder)
 
@@ -167,6 +174,10 @@ class NoMem:
             return []
         return self.retriever.search(query, k, time.time())
 
+    def remember(self, key: str, value: str) -> None:
+        """Pin a durable fact for this user; it joins the state card."""
+        self.store.upsert_fact(self.user_id, key, value)
+
     def facts(self, subject: Optional[str] = None) -> list[dict]:
         """Current slot facts (``valid_to`` unset), oldest first."""
         return self.store.current_slots(self.user_id, subject)
@@ -201,6 +212,16 @@ class NoMem:
                     core_tokens, budget))
             else:
                 log.append(LogEntry("core", "core", "included fixed core memory", core_tokens, budget))
+
+        # 1b. State card — current facts, query-relevant first, from slots
+        #     the rules extracted and facts pinned with remember().
+        if self.facts_ratio > 0 and budget > 0:
+            cap = int(budget * self.facts_ratio)
+            card, cost = self._state_card(query, cap, log)
+            if card:
+                messages.append(card)
+                used += cost
+                budget -= cost
 
         # One read of the session's messages serves both the retrieval
         # exclusion probe and the final window fill.
@@ -385,13 +406,63 @@ class NoMem:
         kept.reverse()  # chronological order for the final prompt
         return kept
 
-    @staticmethod
-    def _retrieved_block(items: list[Message]) -> dict:
-        """Render retrieved memories as a single labelled system message."""
+    def _state_card(self, query: Optional[str], cap: int, log: list[LogEntry]):
+        """Greedy-fill a "Known facts" block within ``cap`` tokens."""
+        pinned = self.store.get_facts(self.user_id)
+        current = self.store.current_slots(self.user_id)
+        if not pinned and not current:
+            return None, 0
+        relevant = [r for r in slot_matches(self.store, self.user_id, query, False)] if query else []
+        # With a query, only facts it asks about earn budget; without one the
+        # card is a general profile, newest first.
+        rest = [] if query else sorted(current, key=lambda r: -r["valid_from"])
+        lines: list[str] = [f"- {k}: {v}" for k, v in pinned.items()]
+        for r in relevant + rest:
+            who = "" if r["subject"] == "user" else f"{r['subject']} "
+            lines.append(f"- {who}{r['attribute'].replace('_', ' ')}: {r['value']} "
+                         f"(since {_date(r['valid_from'])})")
+        head = "Known facts:"
+        kept: list[str] = []
+        cost = 0
+        for line in lines:
+            trial = self.counter.count_message("system", "\n".join([head] + kept + [line]))
+            if trial <= cap:
+                kept.append(line)
+                cost = trial
+        if not kept:
+            log.append(LogEntry("dropped", "core", f"state card ({len(lines)} facts) does not fit {cap} tokens", 0, cap))
+            return None, 0
+        log.append(LogEntry("facts", "core",
+            f"state card: {len(kept)} of {len(lines)} fact(s), {len(relevant)} matched the query", cost, cap - cost))
+        return {"role": "system", "content": "\n".join([head] + kept)}, cost
+
+    def _retrieved_block(self, items: list[Message]) -> dict:
+        """Render retrieved memories as a single labelled system message.
+
+        A memory whose fact was later superseded says so, with the newer
+        value, so the agent sees the change instead of a silent conflict.
+        """
+        notes = self._superseded_notes(items) if items else {}
         lines = ["Relevant earlier context:"] + [
-            f"- [{_date(m.created_at)}] {m.role}: {m.content}" for m in items
+            f"- [{_date(m.created_at)}] {m.role}: {m.content}{notes.get(m.id, '')}" for m in items
         ]
         return {"role": "system", "content": "\n".join(lines)}
+
+    def _superseded_notes(self, items: list[Message]) -> dict[int, str]:
+        src = self.store.slots_from_messages(self.user_id, [m.id for m in items])
+        notes: dict[int, str] = {}
+        for mid, rows in src.items():
+            parts = []
+            for r in rows:
+                if r["valid_to"] is None or not r["closed_by"]:
+                    continue
+                newer = [n for n in self.store.slots_from_messages(self.user_id, [r["closed_by"]]).get(r["closed_by"], [])
+                         if n["attribute"] == r["attribute"]]
+                now = f"; now {newer[0]['value']}" if newer else ""
+                parts.append(f"{r['attribute'].replace('_', ' ')} changed on {_date(r['valid_to'])}{now}")
+            if parts:
+                notes[mid] = " (superseded: " + "; ".join(parts) + ")"
+        return notes
 
     @staticmethod
     def _render(messages: list[dict]) -> str:
