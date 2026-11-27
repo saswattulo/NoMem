@@ -245,3 +245,34 @@ def test_summary_is_off_by_default():
     for i in range(40):
         mem.add_user(f"ok {i}")
     assert "Earlier conversation" not in mem.build_context().text
+
+
+# -- optional vectors ---------------------------------------------------------
+
+def test_vector_ranker_finds_a_spelling_variant_keywords_miss(tmp_path):
+    from nomem import HashingEmbedder
+
+    db = str(tmp_path / "v.db")
+    emb = HashingEmbedder()
+    mem = mk(db=db, embedder=emb, retrieval_top_k=3)
+    mem.add_user("We visited the Guggenheim museum.")
+    for i in range(20):
+        mem.add_user(f"filler line number {i}")
+    hits = mem.search_hits("guggenhiem", 3)  # typo: no keyword match
+    assert hits and hits[0].message.content.startswith("We visited the Guggenheim")
+    assert any(r.startswith("vector#") for r in hits[0].reasons)
+    mem.close()
+
+    # Vectors persist: a fresh instance (and embedder) searches them.
+    again = mk(db=db, embedder=HashingEmbedder(), retrieval_top_k=3)
+    assert again.search("guggenhiem", 1)[0].content.startswith("We visited")
+    # ...and new writes join the cached matrix.
+    again.add_user("The Rijksmuseum was crowded.")
+    assert again.search("rijksmusem", 1)[0].content.startswith("The Rijksmuseum")
+
+
+def test_embedder_is_optional_and_off_by_default():
+    mem = mk()
+    assert mem.embedder is None
+    mem.add_user("hello")
+    assert mem.store.vectors("default", "default") == []

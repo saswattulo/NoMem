@@ -79,13 +79,6 @@ class Retriever:
                 lists["slot"] = [r["source_message_id"] for r in sl if r["source_message_id"]][: c.pool]
         if w.get("vector") and self.embedder is not None:
             lists["vector"] = self.embedder.search(s, u, sid, query, c.pool)
-        if w.get("context") and c.context_span > 0:
-            seeds = _fuse({k: v for k, v in lists.items()}, w, c.rrf_k)[: c.context_seeds]
-            nb = s.neighbors(u, sid, seeds, c.context_span)
-            ctx: list[int] = []
-            for sd in seeds:
-                ctx += [i for i in nb.get(sd, []) if i not in ctx]
-            lists["context"] = ctx
         return lists
 
     def search(self, query: str, k: int, now: float) -> list[Hit]:
@@ -96,6 +89,23 @@ class Retriever:
         fused = _fuse(lists, c.weights, c.rrf_k, scores=True)
         if not fused:
             return []
+        # Neighbouring turns: an answer often sits right after the turn that
+        # shares the question's words. Each neighbour of a top hit gains a
+        # share of that hit's score (never a rank of its own, so a neighbour
+        # with no evidence of its own can't outrank the hit that found it).
+        cw = c.weights.get("context", 0)
+        if cw and c.context_span > 0:
+            seeds = fused[: c.context_seeds]
+            nb = self.store.neighbors(self.user_id, self.session_id, [i for i, _ in seeds], c.context_span)
+            acc = dict(fused)
+            ctx: list[int] = []
+            for i, sc in seeds:
+                for j in nb.get(i, []):
+                    acc[j] = acc.get(j, 0.0) + cw * sc
+                    if j not in ctx:
+                        ctx.append(j)
+            lists["context"] = ctx
+            fused = sorted(acc.items(), key=lambda t: (-t[1], -t[0]))
         ids = [i for i, _ in fused]
         msgs = self.store.get_messages(ids)
         ann = self.store.annotations(ids)

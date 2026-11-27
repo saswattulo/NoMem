@@ -22,3 +22,6 @@ Scale rows use synthetic chat with 8 planted facts; latency is per `build_contex
 | 3. Slot ranker + query-relevant state card + superseded-fact notes | 56.3 | 63.2 | 57.3 | 27.4 | 65.0 | 28.2 | 67.4 | 2.2 ms | 2.7 ms | **8/8** | 500/500 |
 | 4a. Ablation: extractive summary slice on (summary_ratio 0.1) | 56.3 | 63.2 | 56.4 | 26.5 | 63.7 | 27.6 | 66.7 | | | | |
 | 4. Extractive compactor, opt-in (summary_ratio default 0); invariants now randomise facts/summary ratios | 56.3 | 63.2 | 57.3 | 27.4 | 65.0 | 28.2 | 67.4 | 1.3 ms | 4.2 ms | 8/8 | 500/500 |
+| 5a. Ablation: + HashingEmbedder (char n-gram hashing, no model), vector weight 1.0 | 51.9 | 58.4 | 53.1 | 23.7 | 60.4 | 25.6 | 63.0 | | | | |
+| 5b. Ablation: + HashingEmbedder, vector weight 0.5 | 53.6 | 61.3 | 54.7 | 24.7 | 62.5 | 26.3 | 64.7 | | | | |
+| 5. Optional embedder interface (off by default); neighbour boost reworked as a share of the seed's score | 56.4 | 63.6 | 57.3 | 27.3 | 65.0 | 28.2 | 67.4 | 1.4 ms | 2.6 ms | 8/8 | 500/500 |
