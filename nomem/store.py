@@ -94,6 +94,31 @@ CREATE TABLE IF NOT EXISTS vectors (
 );
 CREATE INDEX IF NOT EXISTS idx_vectors ON vectors(user_id, session_id);
 
+CREATE TABLE IF NOT EXISTS frames (
+    user_id    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    frame_hash TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    speaker    TEXT NOT NULL,
+    sentence   TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_frames ON frames(user_id, frame_hash, speaker);
+
+CREATE TABLE IF NOT EXISTS conflicts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    older_id   INTEGER NOT NULL,
+    newer_id   INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    attribute  TEXT,
+    detail     TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    UNIQUE(older_id, newer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_conflicts_older ON conflicts(user_id, older_id);
+CREATE INDEX IF NOT EXISTS idx_conflicts_newer ON conflicts(user_id, newer_id);
+
 CREATE TABLE IF NOT EXISTS facts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    TEXT NOT NULL,
@@ -397,6 +422,49 @@ class SQLiteStore:
             for r in self.conn.execute(q, (user_id, *chunk)):
                 out.setdefault(r["source_message_id"], []).append(dict(r))
         return out
+
+    # -- conflicts (contradicting memories, both kept) ----------------------
+
+    def add_frame(self, user_id: str, session_id: str, frame_hash: str, message_id: int,
+                  speaker: str, sentence: str, created_at: float) -> None:
+        self.conn.execute(
+            "INSERT INTO frames (user_id, session_id, frame_hash, message_id, speaker, sentence, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, session_id, frame_hash, message_id, speaker, sentence, created_at),
+        )
+
+    def frames_like(self, user_id: str, frame_hash: str, speaker: str, before_id: int,
+                    limit: int = 5) -> list[dict]:
+        """Earlier sentences with the same frame and speaker, latest first."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM frames WHERE user_id = ? AND frame_hash = ? AND speaker = ? AND message_id < ?"
+            " ORDER BY created_at DESC, message_id DESC LIMIT ?",
+            (user_id, frame_hash, speaker, before_id, limit))]
+
+    def add_conflict(self, user_id: str, older_id: int, newer_id: int, kind: str, detail: str,
+                     confidence: float, attribute: Optional[str] = None) -> None:
+        """Link two contradicting memories. The stronger evidence wins a repeat."""
+        self.conn.execute(
+            "INSERT INTO conflicts (user_id, older_id, newer_id, kind, attribute, detail, confidence)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(older_id, newer_id) DO UPDATE SET"
+            " kind = excluded.kind, attribute = excluded.attribute, detail = excluded.detail,"
+            " confidence = excluded.confidence WHERE excluded.confidence > conflicts.confidence",
+            (user_id, older_id, newer_id, kind, attribute, detail, confidence),
+        )
+
+    def conflicts(self, user_id: str, ids: Optional[list[int]] = None) -> list[dict]:
+        """Conflicts touching any of ``ids`` (all of the user's when ``None``)."""
+        if ids is None:
+            return [dict(r) for r in self.conn.execute(
+                "SELECT * FROM conflicts WHERE user_id = ? ORDER BY id", (user_id,))]
+        out: dict[int, dict] = {}
+        for chunk in _chunks(ids):
+            ph = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                f"SELECT * FROM conflicts WHERE user_id = ? AND (older_id IN ({ph}) OR newer_id IN ({ph}))",
+                (user_id, *chunk, *chunk)):
+                out[r["id"]] = dict(r)
+        return [out[k] for k in sorted(out)]
 
     def commit(self) -> None:
         self.conn.commit()

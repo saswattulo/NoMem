@@ -81,6 +81,23 @@ class Embedder(ABC):
             entry["mat"] = _np.asarray(entry["rows"], dtype=_np.float32)
         return entry
 
+    def similar(self, store, user_id: str, session_id: str, text: str, k: int) -> list[tuple[int, float]]:
+        """``(message_id, cosine)`` for the ``k`` nearest stored messages."""
+        entry = self._matrix(store, user_id, session_id)
+        if not entry["ids"]:
+            return []
+        q = _normalise(self.encode([text])[0])
+        if _np is not None:
+            sims = entry["mat"] @ _np.asarray(q, dtype=_np.float32)
+            k = min(k, len(sims))
+            top = _np.argpartition(-sims, k - 1)[:k]
+            top = top[_np.argsort(-sims[top])].tolist()
+            sims = sims.tolist()
+        else:
+            sims = [sum(a * b for a, b in zip(row, q)) for row in entry["rows"]]
+            top = sorted(range(len(sims)), key=lambda i: -sims[i])[:k]
+        return [(entry["ids"][i], float(sims[i])) for i in top]
+
     def search(self, store, user_id: str, session_id: str, query: str, k: int) -> list[int]:
         entry = self._matrix(store, user_id, session_id)
         if not entry["ids"]:

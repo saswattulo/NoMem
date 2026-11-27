@@ -5,6 +5,7 @@ Framework-neutral core; local-first (SQLite); no LLM anywhere, by design.
 """
 
 from .compactor import Compactor, ExtractiveCompactor, NullCompactor
+from .conflicts import ConflictConfig
 from .core import NoMem
 from .embed import Embedder, HashingEmbedder, Model2VecEmbedder, SentenceTransformerEmbedder
 from .retrieval import Hit, RetrievalConfig
@@ -35,6 +36,7 @@ __all__ = [
     "ExtractiveCompactor",
     "NullCompactor",
     "RetrievalConfig",
+    "ConflictConfig",
     "Hit",
     "Embedder",
     "HashingEmbedder",

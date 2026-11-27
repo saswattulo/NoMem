@@ -36,6 +36,28 @@ Scale rows use synthetic chat with 8 planted facts; latency is per `build_contex
 | 7h. Ablation: + HashingEmbedder at the new defaults | 57.6 | 65.2 | 58.5 | | | | | | | | |
 | 7. Defaults: vector weight 1.0 -> 0.15, ranker pool 50 -> 100. **Keyword only** (no embedder) | 56.8 | 64.0 | 57.6 | 27.4 | 65.1 | 28.2 | 68.0 | 1.5 ms | 3.1 ms | 8/8 | 500/500 |
 | 7. Same defaults **+ Model2Vec potion-base-8M** (`run_all.py --embedder model2vec`) | **58.6** | **66.0** | **59.7** | 29.1 | 67.1 | 31.1 | 70.1 | 3.5 ms | 7.1 ms | 8/8 | 500/500 |
+| 8. Contradiction detection (slot / frame / update-cue conflicts, markers on retrieved memories, previous value on the state card). **Keyword only** | 56.8 | 64.0 | 57.6 | 27.4 | 65.1 | 28.2 | 68.0 | 1.3 ms | 2.7 ms | 8/8 | 500/500 |
+| 8. Same **+ Model2Vec potion-base-8M** | 58.6 | 66.0 | 59.7 | 29.1 | 67.1 | 31.1 | 70.1 | 2.5 ms | 5.2 ms | 8/8 | 500/500 |
+
+
+Step 8 leaves retrieval untouched (identical recall) and costs ingest speed:
+50k-message ingest 4,649 -> 3,860 msg/s keyword only, 3,027 -> 2,693 msg/s with
+Model2Vec. Invariant trials now also mix in statements that contradict each other.
+
+Updated-facts benchmark (`updates_bench.py`, same numbers with and without Model2Vec):
+
+| Step | Tuned: detected | Tuned: false flags | Held-out: detected | Held-out: false flags | LoCoMo pairs flagged (5,882 turns) |
+| --- | --- | --- | --- | --- | --- |
+| 8a. First version: cue anywhere in the sentence, one shared topic word needs 0.6 | 29/40 | 0/30 | | | |
+| 8b. Lower bar for one shared topic word, strong cues add confidence, "Correction:" no longer read as a speaker | 40/40 | 0/30 | | | 61 (all wrong on inspection) |
+| 8c. Changed value must sit in the clause with the cue; sentence-initial words and greeted names ("Hey John") are not values; only upcoming dates can be "moved"; "new" is not a cue | 40/40 | 0/30 | | | 5 |
+| 8d. Generic "my X is Y" slot changes count only when both sides look like values | 40/40 | 0/30 | 16/20 | 1/20 | 2 |
+
+The held-out set was written after 8d and never tuned on. Its misses: a weekday
+plan ("on Wednesday" is read as last Wednesday), a change with no value
+("by car" -> "by train"), and two singular/plural mismatches ("bank"/"banks",
+"1 dog"/"2 dogs"). Its false flag: "I'm learning French" -> "I'm learning to cook
+Thai food now".
 
 Step 7 held-out check: tuned weights also win on each half of LoCoMo separately
 (conversations 0-4: R@5 55.5 -> 59.4 vs old Model2Vec settings; conversations 5-9:

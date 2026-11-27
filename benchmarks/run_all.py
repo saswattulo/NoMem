@@ -3,6 +3,9 @@
 Usage:
     python benchmarks/run_all.py [--label NAME] [--quick] [--embedder model2vec|hashing|MODEL]
 
+Runs LoCoMo retrieval, the scale/invariant stress test and the updated-facts
+(contradiction) benchmark.
+
 Writes full results to benchmarks/results/<label>.json (git-ignored).
 """
 
@@ -18,6 +21,7 @@ sys.path.insert(0, str(HERE))
 
 import locomo_bench  # noqa: E402
 import stress  # noqa: E402
+import updates_bench  # noqa: E402
 
 
 def make_embedder(name: str):
@@ -53,6 +57,7 @@ def main() -> None:
     else:
         print("(LoCoMo data missing, skipping; see benchmarks/README.md)")
     out["stress"] = stress.run(args.quick, mem_kwargs=mem_kwargs)
+    out["updates"] = updates_bench.run(mem_kwargs=mem_kwargs)
 
     (HERE / "results").mkdir(exist_ok=True)
     (HERE / "results" / f"{args.label}.json").write_text(json.dumps(out, indent=2))
@@ -70,6 +75,14 @@ def main() -> None:
               f"query p50 {s['query_p50_ms']}ms p95 {s['query_p95_ms']}ms  planted {s['planted_recall']}")
     inv = out["stress"]["invariants"]
     print(f"invariants: {inv['invariant_trials']} trials, {inv['violations']} violations")
+    up = out["updates"]
+    for name in ("tuned", "heldout"):
+        u = up[name]
+        print(f"updated facts ({name}): detected {u['detected']}/{u['updates']}  "
+              f"both surfaced {u['both_surfaced']}%  false flags {u['false_flags']}/{u['controls']}")
+    if up.get("locomo"):
+        lf = up["locomo"]
+        print(f"LoCoMo conflicts flagged: {lf['conflicts']} in {lf['messages']} turns ({lf['per_1k_messages']}/1k)")
 
 
 if __name__ == "__main__":

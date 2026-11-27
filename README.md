@@ -123,8 +123,8 @@ one hard budget:
    entities (ignoring ones that appear everywhere), dates in the question,
    slot facts, optional vectors, and the turns either side of a strong hit.
    An importance prior re-orders the result and duplicates are collapsed.
-   A memory whose fact was later superseded says so:
-   `I live in Pune. (superseded: location changed on 20 Mar 2026; now Bangalore)`.
+   A memory that a later one contradicts carries a conflict marker quoting
+   the other side with its date (see [Contradictions](#contradictions)).
 3. **Recent conversation**, newest first, as a contiguous window.
 4. Optionally, an **extractive summary** of turns that just fell out of the
    window (`summary_ratio`, off by default): the most informative sentences,
@@ -153,6 +153,38 @@ mem.remember("preferred name", "Sas")         # pin a fact yourself
 ```
 
 See `examples/facts_demo.py` and `examples/retrieval_demo.py`.
+
+### Contradictions
+
+People change their minds, addresses and flight times. NoMem doesn't pick a
+winner or rewrite anything: when a newer memory changes an older one, both
+are kept, linked as a *conflict*, and shown together with their dates so the
+agent's own model decides. Three deterministic detectors run on write:
+
+| Detector | Catches | Example |
+| --- | --- | --- |
+| `slot` | A single-valued fact gets a new value, or a like is negated | "I live in Pune" ... "I moved to Bangalore" |
+| `frame` | The same sentence with a different number, time, date or name | "I have 2 kids" ... "I have 3 kids" |
+| `update` | An update cue ("moved", "postponed", "now", "actually", "instead" ...) plus a shared topic word and a changed value of the same type, from the same speaker | "My flight leaves at 9am" ... "Actually my flight got moved to 11am" |
+
+Recency only decides direction: the later memory is marked as the update.
+Retrieved memories then read:
+
+```
+- [5 Jan 2026] user: My flight leaves at 9am on Friday. [CONFLICT: changed on 25 Jan 2026 (flight: 09:00 -> 11:00); user said "Actually my flight got moved to 11am."]
+```
+
+and the Known-facts card says `location: Bangalore (since 20 Mar 2026; before
+that Pune, said 1 Mar 2026)`. `mem.conflicts()` lists every pair with both
+texts, dates, the detector and a confidence. With an embedder, vector
+neighbours add candidates and raise confidence. Tune or turn it off with
+`NoMem(conflicts=ConflictConfig(...))`.
+
+The rules aim for precision: on real LoCoMo chat they flag 2 pairs in 5,882
+turns. On the updated-facts benchmark they find 40/40 of the cases they
+were tuned on and 16/20 held-out ones, with 1 false flag in 50 look-alike
+controls. Misses are mostly changes with no number, time or name
+("I commute by train now instead") and plural mismatches ("1 dog" / "2 dogs").
 
 ### Optional vectors
 
@@ -202,6 +234,7 @@ search results, and in a 1,000-token context?
 | LoCoMo context recall | 52.5% | 57.6% | 59.7% |
 | Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
 | Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
+| Updated facts flagged, held-out (false flags) | | 16/20 (1/50) | 16/20 (1/50) |
 | Write throughput | | ~4,000 msg/s | ~1,500 msg/s |
 | Write cost | 0 model calls | 0 model calls | 1 embedding (no generative model) |
 
@@ -214,6 +247,9 @@ search results, and in a 1,000-token context?
   keyphrases, importance), bi-temporal slot facts with supersession, hybrid
   retrieval with RRF, a Known-facts card, an extractive compactor, optional
   embedders, and a benchmark harness.
+- **M3.5 — Contradictions** ✅ Slot, frame and update-cue conflict detection;
+  both memories surfaced with dates and a conflict marker; updated-facts
+  benchmark.
 - **M4 — Adapters & polish** LangChain `BaseMemory` adapter, tool-output
   isolation helper, demo notebook.
 - **M5 — Optional encoders** GLiNER entities and a co-occurrence graph with
