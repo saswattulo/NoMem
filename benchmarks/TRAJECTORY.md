@@ -52,12 +52,28 @@ Updated-facts benchmark (`updates_bench.py`, same numbers with and without Model
 | 8b. Lower bar for one shared topic word, strong cues add confidence, "Correction:" no longer read as a speaker | 40/40 | 0/30 | | | 61 (all wrong on inspection) |
 | 8c. Changed value must sit in the clause with the cue; sentence-initial words and greeted names ("Hey John") are not values; only upcoming dates can be "moved"; "new" is not a cue | 40/40 | 0/30 | | | 5 |
 | 8d. Generic "my X is Y" slot changes count only when both sides look like values | 40/40 | 0/30 | 16/20 | 1/20 | 2 |
+| 9a. Fresh held-out set (25 updates, 25 controls) written and committed before any change; the old held-out set becomes the dev set. Baseline on it: | 40/40 | 0/30 | dev 16/20, fresh **11/25** | dev 1/20, fresh 0/25 | 2 |
+| 9b. Singular/plural stemming of topic words and frames; frames per clause | 40/40 | 0/30 | dev 18/20 | dev 2/20 | 3 |
+| 9c. A fact about someone else ("my friend works at ...") never conflicts with one about the speaker | 40/40 | 0/30 | dev 19/20 | dev 1/20 | 3 |
+| 9d. Wording change with no value after a strong cue, first version (content-word sets) | 40/40 | 0/30 | dev 20/20 | dev 1/20 | 45 (all wrong) |
+| 9e. Wording change only between short, plain, first-person statements that line up word for word around one swapped phrase | 40/40 | 0/30 | dev 20/20 | dev 1/20 | 2 |
+| 9. Measured once on the fresh held-out set | | | **fresh 19/25** | **fresh 0/25** | 2 |
 
 The held-out set was written after 8d and never tuned on. Its misses: a weekday
 plan ("on Wednesday" is read as last Wednesday), a change with no value
 ("by car" -> "by train"), and two singular/plural mismatches ("bank"/"banks",
 "1 dog"/"2 dogs"). Its false flag: "I'm learning French" -> "I'm learning to cook
 Thai food now".
+
+Step 9 (weekday schedules are compared by name rather than dated, alongside 9b-9e)
+lifted the fresh held-out set from 11/25 to 19/25 with no false flags, with and
+without Model2Vec. Its remaining misses: numbers as words ("one car" / "two
+cars", "one sibling" / "two siblings"), ordinals ("the 1st" / "the 5th", "3rd" /
+"7th floor"), a lower-camel-case brand ("iPhone" / "Pixel"), and "these days"
+as the only cue for a wording change ("tea" / "coffee"). LoCoMo recall, planted
+facts and invariants are unchanged; 50k-message ingest is ~3,100 msg/s keyword
+only (was ~3,860) and ~2,260 with Model2Vec (was ~2,690), since sentences with a
+strong cue but no value are now checked too.
 
 Step 7 held-out check: tuned weights also win on each half of LoCoMo separately
 (conversations 0-4: R@5 55.5 -> 59.4 vs old Model2Vec settings; conversations 5-9:
