@@ -192,3 +192,50 @@ def test_values_and_frames():
     assert C.frame("I have 2 kids.") == C.frame("I have 3 kids now.")
     assert C.frame("I ran 5 km.") is None  # an event, not a state
     assert C.frame("Is it at 5pm?") is None
+
+
+# -- plurals, weekday schedules, value-less changes ---------------------------
+
+def test_singular_and_plural_topic_words_meet():
+    assert C.stem("banks") == C.stem("bank") == "bank"
+    assert C.stem("bikes") == "bike" and C.stem("cities") == "city" and C.stem("bus") == "bus"
+    if not fts():
+        pytest.skip("FTS5 not available")
+    mem = mk()
+    a, b = chat(mem, "We have 1 rabbit.", "We have 2 rabbits now, a neighbour gave us one!")
+    assert linked(mem, a, b)
+
+
+def test_a_weekday_schedule_is_a_plan_not_a_past_date():
+    v = C.sentence_values("Choir practice is on Tuesdays", T0)
+    assert v.day == {"tuesday"} and not v.date
+    assert C.sentence_values("I saw her last Tuesday", T0).day == set()
+    if not fts():
+        pytest.skip("FTS5 not available")
+    mem = mk()
+    a, b = chat(mem, "Choir practice is on Tuesday.", "Choir practice moved to Monday nights.")
+    [c] = linked(mem, a, b)
+    assert c["detail"] == "choir/practice: tuesday -> monday"
+
+
+def test_a_change_of_wording_with_no_value_is_caught_after_a_strong_cue():
+    if not fts():
+        pytest.skip("FTS5 not available")
+    mem = mk()
+    a, b = chat(mem, "I pay my rent by cheque.", "I pay my rent by card now instead.")
+    [c] = linked(mem, a, b)
+    assert c["detail"] == "pay/rent: cheque -> card"
+    assert C.term_swap("My commute is by car.", ["I commute by train now instead"], {"commute"}) == (
+        "term", "car", "train")
+
+
+@pytest.mark.parametrize("x,y", [
+    ("I pay my rent by cheque.", "My flatmate pays the rent by card now."),   # someone else
+    ("I pay my rent by cheque.", "I don't pay rent by card now."),            # negation
+    ("I feel so happy about the trip.", "I feel nervous about the trip now."), # feelings, not facts
+    ("I work at Acme.", "My friend Ana works at Initech now."),               # someone else, with a value
+])
+def test_value_less_and_third_party_lookalikes_are_not_flagged(x, y):
+    mem = mk()
+    a, b = chat(mem, x, y)
+    assert not linked(mem, a, b)

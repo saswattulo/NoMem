@@ -6,7 +6,7 @@ NoMem is LLM-free, so it is measured with metrics that need no LLM either.
 | --- | --- |
 | `locomo_bench.py` | Retrieval quality on [LoCoMo](https://github.com/snap-research/locomo): did the evidence turn for each question make it into the top-k search results, and into the token-budgeted context? |
 | `stress.py` | Write and query latency at 1k / 10k / 50k messages, planted-fact recall at scale, and budget invariants under randomised configs. |
-| `updates_bench.py` | Contradictions: does a newer memory that changes an older one get linked to it (40 tuned + 20 held-out update cases), are both shown in context with a conflict marker, and how often do look-alike pairs (50 controls) or real LoCoMo chat get flagged by mistake? |
+| `updates_bench.py` | Contradictions: does a newer memory that changes an older one get linked to it (40 tuned, 20 dev and 25 fresh held-out update cases), are both shown in context with a conflict marker, and how often do look-alike pairs (75 controls) or real LoCoMo chat get flagged by mistake? |
 | `run_all.py` | Runs all three and prints one summary line per metric (used to build `TRAJECTORY.md`). |
 
 ## Data

@@ -88,9 +88,25 @@ _TIME_OF_DAY = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s?(am|pm|a\.m\.|p\.m\.)(?![
 _MONEY_OR_NUM = re.compile(r"(?:[$£€]\s?)?\b\d[\d,]*(?:\.\d+)?\b(?:\s?(?:%|k\b|m\b|bn\b))?")
 _DATE_WORDS = re.compile(
     r"\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?)?" + A._MONTH_RE + r"\b(?:\s+\d{1,2}(?:st|nd|rd|th)?)?(?:,?\s*\d{4})?"
-    r"|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b",
     re.I,
 )
+# A weekday that names a schedule ("on Wednesday", "Thursdays", "every
+# Sunday"), not a past day ("last Friday"): compared by name, never dated.
+_SCHEDULE_DAY = re.compile(
+    r"(?<!\blast )(?<!\bthis )(?<!\bnext )\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b", re.I)
+
+
+def stem(word: str) -> str:
+    """Crude singular form, so "banks" meets "bank" and "dogs" meets "dog"."""
+    w = word.lower()
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 4 and w.endswith(("ches", "shes", "sses", "xes")):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is", "'s")):
+        return w[:-1]
+    return w
 
 
 # ---------------------------------------------------------------------------
@@ -100,14 +116,19 @@ _DATE_WORDS = re.compile(
 class Values:
     num: set = field(default_factory=set)
     time: set = field(default_factory=set)
+    day: set = field(default_factory=set)
     date: set = field(default_factory=set)
     ent: set = field(default_factory=set)
 
     def kinds(self) -> dict:
-        return {"num": self.num, "time": self.time, "date": self.date, "ent": self.ent}
+        return {"num": self.num, "time": self.time, "day": self.day, "date": self.date, "ent": self.ent}
 
     def any(self) -> bool:
-        return bool(self.num or self.time or self.date or self.ent)
+        return bool(self.num or self.time or self.day or self.date or self.ent)
+
+    def update(self, other: "Values") -> None:
+        for k, v in other.kinds().items():
+            self.kinds()[k].update(v)
 
 
 def _norm_time(m: re.Match) -> str:
@@ -123,11 +144,7 @@ def sentence_values(sent: str, ref: float) -> Values:
     """Values in a sentence, clause by clause (see :func:`clause_values`)."""
     v = Values()
     for c in clauses(sent):
-        cv = clause_values(c, ref)
-        v.num |= cv.num
-        v.time |= cv.time
-        v.date |= cv.date
-        v.ent |= cv.ent
+        v.update(clause_values(c, ref))
     return v
 
 
@@ -143,6 +160,9 @@ def clause_values(sent: str, ref: float) -> Values:
     for m in _TIME_OF_DAY.finditer(sent):
         v.time.add(_norm_time(m))
     rest = _TIME_OF_DAY.sub(" ", rest)
+    for m in _SCHEDULE_DAY.finditer(rest):
+        v.day.add(m.group(1).lower())
+    rest = _SCHEDULE_DAY.sub(" ", rest)
     for a, b in A.parse_times(rest, ref):
         if b < ref:
             continue
@@ -172,7 +192,7 @@ def values_conflict(old: Values, new: Values, strong: bool = False) -> Optional[
     ("correction: it's Muffin, Biscuit was my old cat") a new value is
     enough even when the old one is mentioned again.
     """
-    for kind in ("time", "date", "num", "ent"):
+    for kind in ("time", "day", "date", "num", "ent"):
         a, b = old.kinds()[kind], new.kinds()[kind]
         if a and b and (b - a) and ((a - b) or strong):
             return kind, ", ".join(sorted(a - b) or sorted(a)), ", ".join(sorted(b - a))
@@ -197,7 +217,8 @@ def frame(sent: str) -> Optional[str]:
     masked = re.sub(r"(?<=[\w,;:] )[A-Z][a-zA-Z'\-]+(?:\s+[A-Z][a-zA-Z'\-]+)*", "\x00", masked)
     if "\x00" not in masked:
         return None
-    toks = [t for t in re.findall(r"\x00|[a-z][a-z']*", masked.lower()) if t not in _CUE_WORDS]
+    toks = [t if t == "\x00" else stem(t) for t in re.findall(r"\x00|[a-z][a-z']*", masked.lower())
+            if t not in _CUE_WORDS]
     toks = [t for t in toks if t not in {"so", "well", "oh", "hey", "btw", "just", "also", "still"}]
     collapsed: list[str] = []
     for t in toks:
@@ -214,10 +235,95 @@ def frame(sent: str) -> Optional[str]:
     return hashlib.blake2b(key.encode(), digest_size=8).hexdigest()
 
 
+_PEOPLE = frozenset("""
+friend friends sister sisters brother brothers mom mum mother dad father parents wife husband
+partner son daughter kids children boss manager colleague coworker neighbour neighbor roommate
+flatmate cousin aunt uncle grandma grandmother grandpa grandfather niece nephew he she they his
+her their him them girlfriend boyfriend fiance fiancee baby teacher doctor
+""".split())
+
+
+def people(sent: str) -> set[str]:
+    """Who else a sentence is about ("my friend", "she"): a fact about
+    someone else never contradicts a fact about the speaker."""
+    return {w.lower() for w in A.words(sent) if w.lower() in _PEOPLE}
+
+
+_OWN = re.compile(r"\b(?:i|i'm|i've|my|we|we're|our)\b", re.I)
+
+
+def _plain_statement(text: str) -> bool:
+    """Short, first-person, not a question or an exclamation of feeling."""
+    body = A._SPEAKER_PREFIX.sub("", text).strip()
+    ws = A.words(body)
+    return (0 < len(ws) <= 10 and not body.endswith(("?", "!")) and bool(_OWN.search(body))
+            and not ({w.lower() for w in ws} & _FEELING))
+
+
+_FEELING = frozenset("""
+feel feels felt love loving loved hope wish think thought glad happy sad excited thanks thank
+appreciate miss wait can't cannot want wanna gonna sure agree right definitely totally
+""".split())
+
+
+_KEEP_PREPS = frozenset("by from at in on to with for".split())
+
+
+def _seq(text: str) -> list[str]:
+    """Content words plus the prepositions that frame them, in order, stemmed.
+
+    Capitalised words are left out: names here are greetings ("Hey James"),
+    and real names are values the other detectors compare.
+    """
+    out = []
+    for w in A.words(A._SPEAKER_PREFIX.sub("", text)):
+        low = w.lower()
+        if w[0].isupper() and low not in ("i", "i'm", "i've"):
+            continue
+        if low in _CUE_WORDS or any(ch.isdigit() for ch in low):
+            continue
+        if low in _KEEP_PREPS or (low not in A.STOPWORDS and low not in _WEAK_ANCHORS and len(low) > 1):
+            out.append(stem(low))
+    return out
+
+
+def term_swap(old: str, new_clauses: list[str], shared: set[str]) -> Optional[tuple[str, str, str]]:
+    """One short phrase replaced in an otherwise identical short statement.
+
+    "My commute is by car" / "I commute by train now instead" line up as
+    ``commute by [car]`` / ``commute by [train]``. Both statements must be
+    short, plain and first-person, the words around the swap must include
+    the shared topic word, and the swapped phrases are one or two words.
+    """
+    if not _plain_statement(old):
+        return None
+    a = _seq(old)
+    for c in new_clauses:
+        if not _plain_statement(c) or re.search(r"\b(?:not|no|never)\b|n't\b", c, re.I):
+            continue
+        b = _seq(c)
+        if not (2 <= len(a) <= 5 and 2 <= len(b) <= 5):
+            continue
+        p = 0
+        while p < min(len(a), len(b)) and a[p] == b[p]:
+            p += 1
+        q = 0
+        while q < min(len(a), len(b)) - p and a[-1 - q] == b[-1 - q]:
+            q += 1
+        kept = a[:p] + a[len(a) - q:]
+        gone, came = a[p:len(a) - q], b[p:len(b) - q]
+        if not (set(kept) & shared) or not (1 <= len(gone) <= 2 and 1 <= len(came) <= 2):
+            continue
+        if set(gone) & set(came) or all(w in _KEEP_PREPS for w in gone + came):
+            continue
+        return "term", " ".join(gone), " ".join(came)
+    return None
+
+
 def anchors(sent: str, vals: Values) -> set[str]:
     """Topic words: content terms that are not values, cues or filler."""
     ent_words = {w for e in vals.ent for w in e.split()}
-    return {t for t in A.content_terms(A._SPEAKER_PREFIX.sub("", sent))
+    return {stem(t) for t in A.content_terms(A._SPEAKER_PREFIX.sub("", sent))
             if t not in _WEAK_ANCHORS and t not in ent_words and not any(ch.isdigit() for ch in t)
             and len(t) > 2}
 
@@ -267,40 +373,43 @@ def detect(store, user_id: str, session_id: str, msg, speaker: str,
         if sent.rstrip().endswith("?"):
             continue
         vals = sentence_values(sent, msg.created_at)
-        if not vals.any():
+        if not vals.any() and not STRONG_CUE.search(sent):
             continue
         # -- frame: identical frame, different value --------------------
-        if config.frame:
-            fh = frame(sent)
-            if fh:
-                frames_to_add.append((fh, sent))
-                for row in store.frames_like(user_id, fh, speaker, msg.id):
-                    if row["message_id"] in seen:
-                        continue
-                    old = sentence_values(row["sentence"], row["created_at"])
-                    diff = values_conflict(old, vals)
-                    if diff:
-                        conf = 0.7 + (0.15 if UPDATE_CUE.search(sent) else 0.0)
-                        out.append(Conflict(row["message_id"], msg.id, "frame",
-                                            f"{diff[1]} -> {diff[2]}", round(conf, 2)))
-                        seen.add(row["message_id"])
-                        break  # the most recent earlier statement is the one updated
+        # Frames are per clause: "I have 3 kids now, the baby arrived!"
+        # still matches "I have 2 kids".
+        for part in (clauses(sent) if config.frame else []):
+            fh = frame(part)
+            if not fh:
+                continue
+            frames_to_add.append((fh, part))
+            pvals = sentence_values(part, msg.created_at)
+            for row in store.frames_like(user_id, fh, speaker, msg.id):
+                if row["message_id"] in seen:
+                    continue
+                old = sentence_values(row["sentence"], row["created_at"])
+                diff = values_conflict(old, pvals)
+                if diff:
+                    conf = 0.7 + (0.15 if UPDATE_CUE.search(sent) else 0.0)
+                    out.append(Conflict(row["message_id"], msg.id, "frame",
+                                        f"{diff[1]} -> {diff[2]}", round(conf, 2)))
+                    seen.add(row["message_id"])
+                    break  # the most recent earlier statement is the one updated
         # -- update cue: shared topic, different value ------------------
         if config.update and UPDATE_CUE.search(sent):
             strong = bool(STRONG_CUE.search(sent))
             # The changed value must sit in the clause that carries the cue:
             # "the party starts at 9pm instead", not "Wow Dave, ... now".
             new_vals = Values()
-            for c in clauses(sent):
-                if UPDATE_CUE.search(c):
-                    cv = clause_values(c, msg.created_at)
-                    new_vals.num |= cv.num
-                    new_vals.time |= cv.time
-                    new_vals.date |= cv.date
-                    new_vals.ent |= cv.ent
+            cue_clauses = [c for c in clauses(sent) if UPDATE_CUE.search(c)]
+            for c in cue_clauses:
+                new_vals.update(clause_values(c, msg.created_at))
             anc = anchors(sent, vals)
-            if not anc or not new_vals.any():
+            # With no value at all, only a strong cue can carry a change of
+            # wording ("I commute by train now instead").
+            if not anc or not (new_vals.any() or strong):
                 continue
+            who = people(sent)
             cand = store.fts_ranked(user_id, session_id, " ".join(sorted(anc)), config.candidates)
             sims: dict[int, float] = {}
             if embedder is not None:
@@ -324,12 +433,18 @@ def detect(store, user_id: str, session_id: str, msg, speaker: str,
                         continue
                     ovals = sentence_values(osent, m.created_at)
                     shared = anc & anchors(osent, ovals)
-                    if not shared:
+                    if not shared or people(osent) != who:
                         continue
                     diff = values_conflict(ovals, new_vals, strong)
-                    if not diff:
+                    if diff:
+                        conf = 0.4 + 0.1 * min(3, len(shared)) + (0.1 if strong else 0.0)
+                    elif strong:
+                        diff = term_swap(osent, cue_clauses, shared)
+                        if not diff:
+                            continue
+                        conf = 0.6
+                    else:
                         continue
-                    conf = 0.4 + 0.1 * min(3, len(shared)) + (0.1 if strong else 0.0)
                     sim = sims.get(i)
                     if sim is not None:
                         conf += 0.1 if sim >= config.vector_min_similarity else 0.0
