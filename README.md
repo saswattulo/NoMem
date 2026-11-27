@@ -116,10 +116,12 @@ upgrade behind the same interface. See `examples/retrieval_demo.py`.
 - **Pluggable token counting.** `TokenCounter` interface with `OpenAICounter`
   (exact, local via tiktoken), `AnthropicCounter` (exact via API), and a
   zero-dependency `ApproxCounter` fallback.
-- **Pluggable, LLM-free compaction.** The default compactor is deterministic and
-  *extractive* (keep high-signal turns/facts, drop filler) — reproducible and
-  free. An `LLMCompactor` drops in behind the same interface for abstractive
-  summaries. *(Lands in M3.)*
+- **No LLM, by design.** Nothing in NoMem calls a language model: not on
+  write, not on read, not for compaction. Facts, dates, entities and
+  importance come from deterministic rules; compaction is *extractive* (it
+  quotes the most informative sentences, with dates, and never paraphrases),
+  so every line in the context can be traced back to something actually said.
+  There is no `LLMCompactor`, and there won't be one.
 - **Local-first, expandable.** SQLite today; in-memory and vector-DB backends
   behind the same store interface later.
 

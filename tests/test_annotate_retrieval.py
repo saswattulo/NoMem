@@ -203,3 +203,45 @@ def test_retrieved_superseded_fact_is_flagged_with_the_new_value():
 def test_invalid_facts_ratio_raises():
     with pytest.raises(ValueError):
         mk(facts_ratio=1.5)
+
+
+# -- extractive compaction ----------------------------------------------------
+
+def test_extractive_compactor_quotes_key_sentences_within_budget():
+    from nomem.compactor import ExtractiveCompactor
+    from nomem.models import Message
+
+    msgs = [
+        Message("user", "Hi there! I'm planning a trip to Tokyo in March. My budget is 2000 dollars.", id=1, created_at=REF),
+        Message("assistant", "Nice!", id=2, created_at=REF),
+        Message("user", "I'm allergic to peanuts, remember that. The weather is ok.", id=3, created_at=REF),
+    ]
+    counter = ApproxCounter()
+    out = ExtractiveCompactor().compact(msgs, max_tokens=40, counter=counter)
+    assert counter.count_message("system", out) <= 40
+    lines = out.splitlines()[1:]
+    assert lines and all(l.startswith("- [8 May 2023] ") for l in lines)
+    for line in lines:  # every line is a verbatim sentence from a message
+        sent = line.split(": ", 1)[1]
+        assert any(sent in m.content for m in msgs)
+    assert "Nice!" not in out
+
+
+def test_summary_slice_quotes_dropped_turns_and_holds_the_budget():
+    mem = mk(max_tokens=200, summary_ratio=0.3, facts_ratio=0)
+    mem.add_user("My sister's wedding is on 12 August in Lisbon, remember that.", timestamp=REF)
+    for i in range(40):
+        mem.add_user(f"ok {i}")
+    res = mem.build_context()
+    assert "Earlier conversation (key sentences):" in res.text
+    assert "wedding is on 12 August in Lisbon" in res.text
+    assert any(e.action == "summarized" for e in res.log)
+    assert res.tokens_used <= 200
+
+
+def test_summary_is_off_by_default():
+    mem = mk(max_tokens=100)
+    mem.add_user("My sister's wedding is on 12 August in Lisbon, remember that.")
+    for i in range(40):
+        mem.add_user(f"ok {i}")
+    assert "Earlier conversation" not in mem.build_context().text

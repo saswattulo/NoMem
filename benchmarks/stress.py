@@ -93,6 +93,8 @@ def invariants(trials: int, seed: int = 1) -> dict:
             counter=ApproxCounter(),
             retrieval_top_k=rng.randint(0, 8),
             archival_ratio=rng.choice([0.0, 0.1, 0.3, 0.5, 1.0]),
+            facts_ratio=rng.choice([0.0, 0.1, 0.3]),
+            summary_ratio=rng.choice([0.0, 0.0, 0.1, 0.3]),
         )
         msgs = []
         for i in range(rng.randint(0, 60)):
@@ -102,7 +104,8 @@ def invariants(trials: int, seed: int = 1) -> dict:
                 text = rng.choice(msgs).content  # exact repeats
             else:
                 text = _filler(rng) * rng.randint(1, 4)
-            msgs.append(mem.add(rng.choice(["user", "assistant"]), text))
+            msgs.append(mem.add(rng.choice(["user", "assistant"]), text,
+                                timestamp=1.7e9 + 3600 * i * rng.random()))
         query = rng.choice([None, "", "peanuts allergy", "sister Lisbon", "zzz", rng.choice(FACTS)[1]])
         res = mem.build_context(query=query)
 

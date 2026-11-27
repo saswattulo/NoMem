@@ -26,6 +26,7 @@ from datetime import datetime
 from typing import Optional, Union
 
 from . import annotate as A
+from .compactor import Compactor, ExtractiveCompactor
 from .models import ContextResult, LogEntry, Message
 from .retrieval import Hit, RetrievalConfig, Retriever, slot_matches
 from .store import SQLiteStore
@@ -54,6 +55,11 @@ class NoMem:
         facts_ratio: Most of the post-core budget the "known facts" state
             card may use (current slot facts + :meth:`remember` facts,
             query-relevant first). Unused budget rolls over. ``0`` disables.
+        summary_ratio: Share of the post-core budget reserved for an
+            extractive summary of turns that just fell out of the window.
+            Default ``0`` (off): a pure sliding window plus retrieval.
+        compactor: How dropped turns are summarised. Defaults to
+            :class:`~nomem.compactor.ExtractiveCompactor` (quotes, no model).
     """
 
     def __init__(
@@ -71,9 +77,13 @@ class NoMem:
         embedder=None,
         annotate: bool = True,
         facts_ratio: float = 0.1,
+        summary_ratio: float = 0.0,
+        compactor: Optional[Compactor] = None,
     ):
         if max_tokens < 1:
             raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
+        if not 0.0 <= summary_ratio <= 1.0:
+            raise ValueError(f"summary_ratio must be within [0.0, 1.0], got {summary_ratio}")
         if not 0.0 <= facts_ratio <= 1.0:
             raise ValueError(f"facts_ratio must be within [0.0, 1.0], got {facts_ratio}")
         if not 0.0 <= archival_ratio <= 1.0:
@@ -92,6 +102,9 @@ class NoMem:
         self._log: list[LogEntry] = []
         self.annotate = annotate
         self.facts_ratio = facts_ratio
+        self.summary_ratio = summary_ratio
+        self.summary_lookback = 200  # turns before the window the compactor may quote
+        self.compactor = compactor if compactor is not None else ExtractiveCompactor()
         self.embedder = embedder
         self.retriever = Retriever(self.store, user_id, session_id, retrieval, embedder)
 
@@ -223,12 +236,20 @@ class NoMem:
                 used += cost
                 budget -= cost
 
+        # Reserve the summary slice now so retrieval and the window plan
+        # around it; it is spent after the window settles which turns drop.
+        s_cap = int(budget * self.summary_ratio) if self.summary_ratio > 0 and budget > 0 else 0
+        budget -= s_cap
+
         # One read of the session's messages serves both the retrieval
         # exclusion probe and the final window fill.
         # Only the newest messages can ever fit, so never read more than the
         # most the budget could hold (+1 to see the first one that doesn't).
+        # With a summary slice, also read a stretch before the window for
+        # the compactor to quote from.
+        read_limit = self._window_limit() + (self.summary_lookback if s_cap else 0)
         recent = self.store.recent_messages(
-            self.user_id, self.session_id, limit=self._window_limit()
+            self.user_id, self.session_id, limit=read_limit
         )
 
         # 2. Archival retrieval — pull older, relevant messages back into
@@ -249,7 +270,12 @@ class NoMem:
         # 3. Working memory — recent messages fill the remaining budget,
         #    newest first, skipping anything retrieval already surfaced.
         kept = self._fill_working(recent, budget, retrieved_ids, log)
-        unread = self.message_count() - len(recent) if len(recent) == self._window_limit() else 0
+        if s_cap:
+            summary, s_used = self._summarise(recent, kept, retrieved_ids, s_cap, log)
+            if summary:
+                messages.append(summary)
+                used += s_used
+        unread = self.message_count() - len(recent) if len(recent) == read_limit else 0
         if unread > 0:
             log.append(LogEntry("budget_exhausted", "working",
                 f"{unread} older message(s) not read: they cannot fit the budget", 0, None))
@@ -405,6 +431,24 @@ class NoMem:
                 f"{dropped} older message(s) dropped to fit the budget", 0, budget))
         kept.reverse()  # chronological order for the final prompt
         return kept
+
+    def _summarise(self, recent, kept, retrieved_ids, cap: int, log: list[LogEntry]):
+        """Extractive summary of the turns just before the window."""
+        kept_ids = {m.id for m in kept}
+        dropped = [m for m in reversed(recent) if m.id not in kept_ids and m.id not in retrieved_ids]
+        if not dropped:
+            log.append(LogEntry("skipped", "working", "no dropped turns to summarise", 0, cap))
+            return None, 0
+        text = self.compactor.compact(dropped, max_tokens=cap, counter=self.counter)
+        cost = self.counter.count_message("system", text) if text else 0
+        if not text or cost > cap:
+            log.append(LogEntry("skipped", "working",
+                f"nothing from {len(dropped)} dropped turn(s) fit the {cap}-tok summary slice", 0, cap))
+            return None, 0
+        n_lines = text.count("\n")
+        log.append(LogEntry("summarized", "working",
+            f"{n_lines} key sentence(s) quoted from {len(dropped)} dropped turn(s)", cost, cap - cost))
+        return {"role": "system", "content": text}, cost
 
     def _state_card(self, query: Optional[str], cap: int, log: list[LogEntry]):
         """Greedy-fill a "Known facts" block within ``cap`` tokens."""
