@@ -1,6 +1,6 @@
 # Benchmarks
 
-NoMem is LLM-free, so it is measured with metrics that need no LLM either.
+NoMem is LLM-free, so it is measured with metrics that need no LLM either. The one exception is `qa_bench.py`, which puts an LLM in the evaluation (never in NoMem) to produce the answer-accuracy score other memory layers publish.
 
 | Script | What it measures |
 | --- | --- |
@@ -9,6 +9,7 @@ NoMem is LLM-free, so it is measured with metrics that need no LLM either.
 | `stress.py` | Write and query latency at 1k / 10k / 50k messages, planted-fact recall at scale, and budget invariants under randomised configs. |
 | `updates_bench.py` | Contradictions: does a newer memory that changes an older one get linked to it (40 tuned, 20 dev and 25 fresh held-out update cases), are both shown in context with a conflict marker, and how often do look-alike pairs (75 controls) or real LoCoMo chat get flagged by mistake? |
 | `mem0_bench.py` | Mem0 (mem0ai OSS, `infer=False`, no LLM) and NoMem through the same LoCoMo and LongMemEval questions, with identical context packing. Results and the published-vs-measured caveats are in [`MEM0_COMPARISON.md`](MEM0_COMPARISON.md). |
+| `qa_bench.py` | End-to-end answer accuracy on LoCoMo, the LLM-judged **J** score Mem0 publishes: an LLM answers each question from a system's context and an LLM judge grades it, with Mem0's own prompts and model. Runs NoMem (`build_context` and packed search), Mem0 OSS, the whole conversation and no memory through the same pipeline. The LLM is in the harness only; needs `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (the context stage, `--stage contexts`, does not). See [`MEM0_COMPARISON.md`](MEM0_COMPARISON.md#end-to-end-answer-accuracy-llm-judged-j). |
 | `run_all.py` | Runs all four (LongMemEval on an even spread of 100 questions) and prints one summary line per metric (used to build `TRAJECTORY.md`). |
 
 ## Data
