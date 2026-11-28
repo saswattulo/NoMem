@@ -1,5 +1,15 @@
 # NoMem — Not Only Memory
 
+```text
+███╗   ██╗ ██████╗ ███╗   ███╗███████╗███╗   ███╗
+████╗  ██║██╔═══██╗████╗ ████║██╔════╝████╗ ████║
+██╔██╗ ██║██║   ██║██╔████╔██║█████╗  ██╔████╔██║
+██║╚██╗██║██║   ██║██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║
+██║ ╚████║╚██████╔╝██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║
+╚═╝  ╚═══╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝
+  memory for agents · no LLM in the loop
+```
+
 A transparent, token-budgeted **memory layer for agentic and RAG applications**.
 Framework-neutral core, local-first (SQLite), and — by design — **no LLM
 anywhere in the pipeline**: no API key, no model download, no per-message
