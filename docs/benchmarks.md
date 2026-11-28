@@ -9,18 +9,18 @@ to it is in
 
 ## Results
 
-| | v0.1 (FTS5 only) | v0.2+ (hybrid, rules only) | + Model2Vec |
-| --- | --- | --- | --- |
-| LoCoMo search recall@5 | 50.9% | 56.8% | 58.6% |
-| LoCoMo context recall (1,000 tokens) | 52.5% | 58.1% | 59.9% |
-| LongMemEval session recall@5 | | 89.9% | 92.1% |
-| LongMemEval turn recall@5 | | 52.7% | 55.9% |
-| LongMemEval context recall (1,000 tokens) | | 50.0% | 53.2% |
-| Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
-| Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
-| Updated facts caught, fresh held-out (false flags) | | 19/25 (0/25) | 19/25 (0/25) |
-| Write throughput | | ~4,000 msg/s | ~1,500 msg/s |
-| Model calls per write | 0 | 0 | 1 embedding (no generative model) |
+| | v0.1 (FTS5 only) | v0.2+ (hybrid, rules only) | + Model2Vec | Score fusion, rules only | Score fusion + Model2Vec |
+| --- | --- | --- | --- | --- | --- |
+| LoCoMo search recall@5 | 50.9% | 56.8% | 58.6% | **59.6%** | **62.3%** |
+| LoCoMo context recall (1,000 tokens) | 52.5% | 58.1% | 59.9% | 60.8% | 63.4% |
+| LongMemEval session recall@5 | | 89.9% | 92.1% | 89.7% | **93.3%** |
+| LongMemEval turn recall@5 | | 52.7% | 55.9% | **72.4%** | **78.5%** |
+| LongMemEval context recall (1,000 tokens) | | 50.0% | 53.2% | 70.3% | 76.5% |
+| Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms | 3 ms | 5-7 ms |
+| Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 | 8/8 | 8/8 |
+| Updated facts caught, fresh held-out (false flags) | | 19/25 (0/25) | 19/25 (0/25) | 19/25 (0/25) | 19/25 (0/25) |
+| Write throughput | | ~4,000 msg/s | ~1,500 msg/s | ~3,000 msg/s | ~2,200 msg/s |
+| Model calls per write | 0 | 0 | 1 embedding (no generative model) | 0 | 1 embedding |
 
 ## What each benchmark measures
 

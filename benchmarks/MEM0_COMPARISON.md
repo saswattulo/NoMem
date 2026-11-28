@@ -34,44 +34,52 @@ of the budget for recent turns, so its numbers are shown separately.
 
 | System | R@5 | R@10 | Context recall | add p50 | search p50 |
 | --- | --- | --- | --- | --- | --- |
-| NoMem, keyword rules only | 56.8 | 64.0 | 72.4 | 0.5 ms | 5 ms |
-| NoMem + potion-base-8M (default) | **58.6** | 66.0 | 73.6 | 0.6 ms | 6 ms |
+| NoMem, keyword rules only | 59.6 | 67.8 | 77.7 | 0.5 ms | 10 ms* |
+| NoMem + potion-base-8M (default) | **62.3** | **70.3** | **79.0** | 0.7 ms | 8 ms* |
 | Mem0 + potion-base-8M | 55.9 | 64.2 | 73.6 | 10 ms | 72 ms |
-| NoMem + bge-small-en-v1.5 | **59.5** | 67.0 | 74.4 | 67 ms | 49 ms |
-| Mem0 + bge-small-en-v1.5 | 59.1 | 67.4 | **75.5** | 93 ms | 127 ms |
-| NoMem `build_context` (its real API, 30-80% for archival) | | | 59.9 | | |
+| NoMem + bge-small-en-v1.5 | **63.9** | **73.1** | **82.9** | 64 ms | 50 ms |
+| Mem0 + bge-small-en-v1.5 | 59.1 | 67.4 | 75.5 | 93 ms | 127 ms |
+| NoMem 0.3 (rank fusion) + potion, for reference | 58.6 | 66.0 | 73.6 | 0.6 ms | 6 ms |
+| NoMem `build_context` (its real API, 30-80% for archival) | | | 63.4 | | |
+
+NoMem rows re-measured after score fusion (step 12 in `TRAJECTORY.md`);
+Mem0 rows are unchanged from the first run. *Measured with other benchmarks
+running on the same 4 CPUs, so NoMem latencies here are pessimistic.
 
 ### LongMemEval (`longmemeval_s`, even spread of 100 answerable questions, ~49k turns)
 
 | System | Session R@5 | all@5 | Turn R@5 | Turn R@10 | Context recall | add p50 / p95 | search p50 / p95 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| NoMem, keyword rules only | 89.1 | 81.0 | 55.2 | 74.6 | 68.9 | 2.6 / 41 ms | 7 / 22 ms |
-| NoMem + potion-base-8M | **92.8** | **87.0** | 57.1 | 75.6 | 69.1 | 3.1 / 55 ms | 13 / 35 ms |
-| Mem0 + potion-base-8M | 92.2 | 86.0 | **69.0** | **79.2** | **76.5** | 13 / 55 ms | 66 / 219 ms |
-| NoMem `build_context` (+ potion) | | | | | 55.8 | | |
+| NoMem, keyword rules only | 88.2 | 80.0 | 72.0 | 79.0 | 79.4 | 6 / 81 ms* | 14 / 48 ms* |
+| NoMem + potion-base-8M | **92.5** | **87.0** | **77.7** | **85.7** | **86.3** | 2.5 / 48 ms | 11 / 29 ms |
+| Mem0 + potion-base-8M | 92.2 | 86.0 | 69.0 | 79.2 | 76.5 | 13 / 55 ms | 66 / 219 ms |
+| NoMem 0.3 (rank fusion) + potion, for reference | 92.8 | 87.0 | 57.1 | 75.6 | 69.1 | 3.1 / 55 ms | 13 / 35 ms |
+| NoMem `build_context` (+ potion) | | | | | 75.7 | | |
 
 Turn R@5 by question type (NoMem + potion vs Mem0 + potion): single-session
-user 78.6 vs 78.6, single-session assistant 63.6 vs 90.9, preference 41.7 vs
-41.7, multi-session 42.8 vs 51.3, knowledge update 59.4 vs 81.2, temporal
-59.3 vs 71.0. The 100-question spread has 6-27 questions per type, so
-per-type gaps are noisy.
+user 82.1 vs 78.6, single-session assistant 81.8 vs 90.9, preference 66.7 vs
+41.7, multi-session 63.5 vs 51.3, knowledge update 90.6 vs 81.2, temporal
+82.1 vs 71.0. The 100-question spread has 6-27 questions per type, so
+per-type gaps are noisy. The fusion settings were tuned on these 100
+questions; on 124 held-out LongMemEval questions NoMem + potion gets 76.1
+turn R@5 (0.3: 55.6). Mem0 was not run on the held-out set.
 
 ### What the numbers say
 
-1. **On LoCoMo NoMem matches or beats Mem0's retrieval** at the same encoder
-   (58.6 vs 55.9 R@5 with potion; 59.5 vs 59.1 with bge-small), and is
-   10-20x faster to write and search.
-2. **On LongMemEval Mem0 ranks individual turns better** (69.0 vs 57.1 turn
-   R@5) while sessions are a tie (92.8 vs 92.2). Ablation: NoMem with only
-   its vector ranker gets turn R@5 **74.6** and context 81.9 on LongMemEval,
-   but only 37.8 R@5 on LoCoMo; raising the vector RRF weight to 1.0 gives
-   58.3 / 56.2. So the gap is the fusion, not the encoder: rank-based RRF
-   lets a strong keyword match on a long, wordy turn beat a turn that is
-   semantically right. Mem0's score-based fusion (cosine + normalised BM25)
-   keeps both benchmarks good. Trying score-based fusion in
-   `nomem/retrieval.py` is the clearest next step.
-3. **NoMem's own `build_context` gives up 14-21 points of context recall**
-   on these benchmarks (59.9 vs 73.6 on LoCoMo; 55.8 vs 69.1 on LongMemEval)
+1. **On LoCoMo NoMem beats Mem0's retrieval** at the same encoder
+   (62.3 vs 55.9 R@5 with potion; 63.9 vs 59.1 with bge-small), and is
+   10-20x faster to write and search. Even keyword-only NoMem (59.6) is
+   ahead of Mem0 with potion.
+2. **On LongMemEval NoMem now ranks individual turns better too** (77.7 vs
+   69.0 turn R@5; sessions a tie, 92.5 vs 92.2). NoMem 0.3 was at 57.1: its
+   rank-based RRF let a long, wordy turn that repeats a query word beat a
+   turn that is semantically right. Score fusion (BM25 relative to the
+   best hit, squared, plus raw cosine) and a mild long-turn penalty fixed
+   it. Mem0 still leads on single-session-assistant questions (90.9 vs
+   81.8), where the evidence sits in long assistant answers that the
+   length penalty discounts.
+3. **NoMem's own `build_context` gives up about 11-16 points of context
+   recall** on these benchmarks (63.4 vs 79.0 on LoCoMo; 75.7 vs 86.3 on LongMemEval)
    because it keeps recent turns in the budget. That is by design for a live
    agent, but it matters when quoting numbers next to Mem0's packed results.
 

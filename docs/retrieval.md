@@ -89,18 +89,18 @@ default: about 8M parameters, CPU only, about 30 MB, fast enough to embed
 every message on write (about 0.4 ms each). It downloads once from the
 Hugging Face Hub; pass a local path to run fully offline.
 
-On LoCoMo it lifts search recall@5 from 56.8% to 58.6%, and on LongMemEval
-turn recall@5 from 52.7% to 55.9%.
+On LoCoMo it lifts search recall@5 from 59.6% to 62.3%, and on LongMemEval
+(100-question spread) turn recall@5 from 72.0% to 77.7%.
 
-The vector ranker is a light tie-breaker by default (`weights["vector"] =
-0.15`). Static embeddings are weaker than keyword matching on their own
-(41.7% recall@5 vector-only on LoCoMo) and pull recall *down* at equal weight.
-With a stronger encoder, raise the weight.
+Its cosine is added to the keyword score at weight 1.0. Under the old
+rank-only fusion it had to stay a light tie-breaker (0.15), because a
+static embedding's ranking alone is weaker than BM25's; with scores, a weak
+cosine stays small and only a strong one moves a result.
 
 | Embedder | Needs | Use it for |
 | --- | --- | --- |
 | `Model2VecEmbedder(model=...)` | `model2vec` | The default vector ranker. |
-| `SentenceTransformerEmbedder(model="BAAI/bge-small-en-v1.5")` | `sentence-transformers` | A stronger encoder; raise `weights["vector"]`. |
+| `SentenceTransformerEmbedder(model="BAAI/bge-small-en-v1.5")` | `sentence-transformers` | A stronger encoder (63.9% LoCoMo recall@5). |
 | `HashingEmbedder()` | nothing | Character n-grams, no model. Offline use and tests. |
 | your own `Embedder` subclass | | Implement `encode(texts) -> list[list[float]]`. |
 
