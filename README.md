@@ -131,10 +131,11 @@ one hard budget:
    asks about (`facts_ratio`, default 10% of the budget). Ask "what do I do
    for a living?" and it finds `job: backend engineer` with no shared keyword.
 2. **Retrieved memories**, each shown with its date. Several rankers propose
-   candidates and Reciprocal Rank Fusion merges them: FTS5 BM25 keywords,
+   candidates and score fusion merges them: FTS5 BM25 keywords,
    entities (ignoring ones that appear everywhere), dates in the question,
    slot facts, optional vectors, and the turns either side of a strong hit.
-   An importance prior re-orders the result and duplicates are collapsed.
+   An importance prior and a long-turn penalty re-order the result and
+   duplicates are collapsed.
    A memory that a later one contradicts carries a conflict marker quoting
    the other side with its date (see [Contradictions](#contradictions)).
 3. **Recent conversation**, newest first, as a contiguous window.
@@ -152,7 +153,7 @@ memory (`matched by keyword#1, entity#1, slot#1`).
 | `archival_max_ratio` | 0.8 | How far that share may stretch for a direct match that doesn't fit, taking tokens from the oldest recent turns; never past `max_tokens`. Set to `archival_ratio` for a fixed slice |
 | `facts_ratio` | 0.1 | Most the Known-facts card may use (unused rolls over) |
 | `summary_ratio` | 0.0 | Budget share for the extractive summary (off by default) |
-| `retrieval` | `RetrievalConfig()` | Ranker weights, RRF k, importance and recency priors |
+| `retrieval` | `RetrievalConfig()` | Fusion, ranker weights, importance, recency and length priors |
 | `annotate` | `True` | Rule-based annotation on write |
 | `embedder` | `None` | Optional vector ranker |
 

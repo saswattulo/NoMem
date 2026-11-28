@@ -19,9 +19,23 @@ for hit in mem.search_hits("where did I live before?", k=3):
 
 ## How ranking works
 
-Each ranker returns up to `pool` (100) candidates. Reciprocal Rank Fusion
-gives each candidate `weight / (rrf_k + rank)` per ranker it appears in, and
-sums them. Then:
+Each ranker returns up to `pool` (100) candidates, and the fusion sums what
+each ranker gives a candidate (`fusion="score"`, the default):
+
+- **keyword**: `weight * (bm25 / best bm25) ** 2`. BM25 has no fixed scale, so
+  it is taken relative to the query's best keyword hit, and squared so a hit
+  far behind the best one counts for little.
+- **vector**: `weight * cosine`. Cosine already has a fixed scale, so a weak
+  semantic match stays weak even when it is the best one.
+- **entity, time, slot**: these only rank, so they add
+  `weight * (rrf_k + 1) / (rrf_k + rank + 1)`, worth `weight` at rank 1.
+
+Rank-only fusion (`fusion="rrf"`, NoMem 0.3's default) treats the keyword #1
+and #20 as nearly equal and let long turns that repeat a query word outvote a
+short turn that is semantically right; score fusion took LongMemEval turn
+recall@5 from 57.1% to 77.7% with Model2Vec (see [Benchmarks](benchmarks.md)).
+
+Then:
 
 - an **importance prior** multiplies the score by
   `1 - w/2 + w * importance` (`importance_weight`, default 0.3), where
@@ -29,16 +43,28 @@ sums them. Then:
   statements;
 - an optional **recency prior** (`recency_half_life_days`, off by default)
   favours newer memories;
+- a **long-turn penalty** scales hits over 400 characters by
+  `(400 / length) ** 0.3`: a pasted document or a 3,000-character answer
+  matches many query words by size alone;
 - **near-duplicates** (SimHash within 3 bits) are collapsed to one;
 - the **context** ranker adds the turns either side of the top 5 hits, so an
-  answer that spans two turns comes in whole.
+  answer that spans two turns comes in whole. Only neighbours said in the
+  same role get it (two people talking; an assistant's reply to a user's
+  fact is usually advice about it, not more facts).
+
+Search is scoped to the session: facts are per user, but the slot ranker
+only points at messages in the session being searched.
+
+If the embedder raises, `add()` stores the message without a vector and
+search falls back to the other rankers (both warn). Vectors of a different
+size (from an earlier embedder) are skipped with a warning.
 
 ```python
 from nomem import NoMem, RetrievalConfig
 
 mem = NoMem(retrieval=RetrievalConfig(
     weights={"keyword": 1.0, "entity": 0.5, "time": 0.5,
-             "vector": 0.15, "context": 0.2, "slot": 0.5},
+             "vector": 1.0, "context": 0.35, "slot": 0.5},
     recency_half_life_days=30,   # favour the last month
 ))
 ```

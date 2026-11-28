@@ -152,17 +152,23 @@ _STOPWORDS = {
 }
 
 
-def _fts_query(text: str) -> Optional[str]:
+def _fts_query(text: str, max_terms: int = 64) -> Optional[str]:
     """Turn arbitrary user text into a safe FTS5 MATCH expression.
 
     Stop words are dropped so retrieval keys on meaningful terms; if a query is
     *only* stop words we fall back to using them so it still returns something.
+    Repeats are dropped, and a very long query (a pasted document) keeps only
+    its ``max_terms`` longest words, so one read can't turn into a scan of
+    thousands of OR terms.
     """
-    terms = re.findall(r"\w+", text.lower())
+    terms = list(dict.fromkeys(re.findall(r"\w+", text.lower())))
     meaningful = [t for t in terms if t not in _STOPWORDS]
     terms = meaningful or terms
     if not terms:
         return None
+    if max_terms and len(terms) > max_terms:
+        keep = set(sorted(terms, key=lambda t: (-len(t), t))[:max_terms])
+        terms = [t for t in terms if t in keep]
     return " OR ".join(f'"{t}"' for t in terms)
 
 
@@ -270,6 +276,32 @@ class SQLiteStore:
             (match, user_id, session_id, k),
         )
         return [int(r["id"]) for r in rows]
+
+    def fts_scored(
+        self, user_id: str, session_id: str, query: str, k: int, max_terms: int = 64
+    ) -> list[tuple[int, float]]:
+        """``(message_id, bm25)`` best first; higher is better (FTS5's sign flipped)."""
+        if not self.fts_enabled or k <= 0:
+            return []
+        match = _fts_query(query, max_terms)
+        if match is None:
+            return []
+        rows = self.conn.execute(
+            "SELECT f.message_id AS id, bm25(messages_fts) AS s FROM messages_fts f "
+            "WHERE messages_fts MATCH ? AND f.user_id = ? AND f.session_id = ? "
+            "ORDER BY s LIMIT ?",
+            (match, user_id, session_id, k),
+        )
+        return [(int(r["id"]), -float(r["s"])) for r in rows]
+
+    def in_session(self, user_id: str, session_id: str, ids) -> set[int]:
+        """The subset of ``ids`` that are messages of this user's session."""
+        out: set[int] = set()
+        for chunk in _chunks(list(dict.fromkeys(ids))):
+            q = (f"SELECT id FROM messages WHERE user_id = ? AND session_id = ? "
+                 f"AND id IN ({','.join('?' * len(chunk))})")
+            out.update(int(r["id"]) for r in self.conn.execute(q, (user_id, session_id, *chunk)))
+        return out
 
     def get_messages(self, ids: list[int]) -> dict[int, Message]:
         out: dict[int, Message] = {}

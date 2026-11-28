@@ -52,14 +52,23 @@ from nomem import RetrievalConfig
 | Field | Default | What it does |
 | --- | --- | --- |
 | `pool` | `100` | Candidates taken from each ranker. |
-| `rrf_k` | `60` | RRF constant (Cormack et al., 2009). |
-| `weights` | `keyword 1.0, entity 0.5, time 0.5, vector 0.15, context 0.2, slot 0.5` | Weight of each ranker in the fusion. |
+| `fusion` | `"score"` | `"score"` adds keyword and vector scores; `"rrf"` is rank-only Reciprocal Rank Fusion. |
+| `rrf_k` | `60` | RRF constant (Cormack et al., 2009); also shapes the rank bonus of rank-only rankers. |
+| `keyword_power` | `2.0` | BM25 share of the query's best hit is raised to this power (`"score"` only). |
+| `weights` | `keyword 1.0, entity 0.5, time 0.5, vector 1.0, context 0.35, slot 0.5` | Weight of each ranker in the fusion. |
+| `length_penalty` | `0.3` | Hits longer than `length_pivot` characters are scaled by `(pivot / length) ** penalty`. |
+| `length_pivot` | `400` | Length (characters) where the penalty starts. |
+| `context_same_role` | `True` | Only neighbours said in the same role as the hit get the context lift. |
+| `max_query_terms` | `64` | Longest distinct query words sent to the keyword index. |
 | `importance_weight` | `0.3` | Strength of the importance prior. |
 | `recency_half_life_days` | `None` | Recency prior; `None` turns it off. |
 | `near_dup_bits` | `3` | SimHash distance treated as a near-duplicate. |
 | `context_span` | `1` | Neighbouring turns added either side of a top hit. |
 | `context_seeds` | `5` | How many top hits get neighbours. |
 | `entity_max_df` | `0.02` | Ignore entities that appear in more than this share of messages. |
+
+`RetrievalConfig.legacy()` returns NoMem 0.3's retrieval (RRF, vector 0.15,
+context 0.2, no length penalty) for comparison.
 
 ## `ConflictConfig`
 
