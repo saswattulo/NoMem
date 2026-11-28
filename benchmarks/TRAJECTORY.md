@@ -277,3 +277,53 @@ user; a failing embedder no longer loses the message or fails search; vectors
 of another size are skipped with a warning; NaN vectors are neutralised; the
 vector cache no longer keys on `id(store)` (reused after garbage collection);
 queries keep their 64 longest distinct words; `RetrievalConfig` is validated.
+
+## Assistant cue (step 13)
+
+After step 12, Mem0 still led on single-session-assistant questions (90.9 vs
+81.8 turn R@5 on the 100-question spread): the answer sits in an assistant
+reply, often a long one, and the long-turn penalty plus the same-role
+context rule let the user's question (which shares more of the query's
+words) rank above it.
+
+Tried first, and dropped: indexing every turn over 800 characters a second
+time as ~400-character passages (keyword and vector), with a turn scored by
+the better of itself and its best passage, the passage exempt from the
+length penalty. On all 470 questions it cost the user-fact categories much
+more than it gained (turn R@5 78.5 -> 64-76 depending on weight; preference
+51 -> 33-44, multi-session 69 -> 48-64), because LongMemEval's haystacks are
+full of long ShareGPT replies whose passages then match. Even applied only
+to questions about the assistant, it gained at most 1 of the 56
+single-session-assistant questions, while tripling the vector rows and FTS
+entries per long turn.
+
+What worked is a query cue (`annotate.asks_about_assistant`): past-tense
+verbs after "you" ("you recommended", "did you suggest") or "our previous /
+last conversation". When it fires, assistant turns' scores are multiplied by
+`assistant_cue_boost` (1.6) and the reply next to a matching user turn gets
+the context lift despite its role. "Remind me" and "we talked about" alone
+don't fire it, since they also ask for the user's own facts. It fires on
+51 of the 56 single-session-assistant questions and on none of LongMemEval's
+other 414 answerable questions or LoCoMo's 1,986.
+
+Tuned (boost 1.6; 1.6-2.0 is flat) on the 100-question spread, then checked
+on the 124 held-out questions and on all 470:
+
+| Turn R@5, + Model2Vec | Spread (100) | Held-out (124) | All 470 |
+| --- | --- | --- | --- |
+| single-session-assistant, before | 81.8 | 80.0 | 82.1 |
+| single-session-assistant, after | **90.9** | **86.7** | **89.3** |
+| Overall, before | 77.7 | 76.1 | 78.5 |
+| Overall, after | **78.7** | **76.9** | **79.3** |
+
+Keyword only, all 470: single-session-assistant 83.9 -> 87.5, overall
+72.4 -> 72.9 (the spread is unchanged at 72.0). Every other question type,
+LoCoMo (62.3 / 59.6 R@5), stress (planted 8/8, 0 of 500 invariant
+violations) and the updated-facts benchmark are unchanged. LongMemEval
+context recall through `build_context` rises 75.7 -> 77.7; packed search
+results (`mem0_bench.py --system nomem`) dip 86.3 -> 85.3, as the assistant
+turns that now rank higher are longer and fewer fit in 1,000 tokens.
+
+Mem0 (OSS 2.2.1, `infer=False`, potion) on all 56 single-session-assistant
+questions through `mem0_bench.py`'s harness: turn R@5 85.7, context 78.6;
+NoMem on the same harness: 89.3 and 85.7.

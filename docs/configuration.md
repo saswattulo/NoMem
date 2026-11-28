@@ -59,6 +59,7 @@ from nomem import RetrievalConfig
 | `length_penalty` | `0.3` | Hits longer than `length_pivot` characters are scaled by `(pivot / length) ** penalty`. |
 | `length_pivot` | `400` | Length (characters) where the penalty starts. |
 | `context_same_role` | `True` | Only neighbours said in the same role as the hit get the context lift. |
+| `assistant_cue_boost` | `1.6` | For a question about what the assistant said ("the hotel you recommended"), assistant turns' scores are multiplied by this, and a user turn's reply gets the context lift. `1.0` turns it off. |
 | `max_query_terms` | `64` | Longest distinct query words sent to the keyword index. |
 | `importance_weight` | `0.3` | Strength of the importance prior. |
 | `recency_half_life_days` | `None` | Recency prior; `None` turns it off. |
@@ -68,7 +69,7 @@ from nomem import RetrievalConfig
 | `entity_max_df` | `0.02` | Ignore entities that appear in more than this share of messages. |
 
 `RetrievalConfig.legacy()` returns NoMem 0.3's retrieval (RRF, vector 0.15,
-context 0.2, no length penalty) for comparison.
+context 0.2, no length penalty, no assistant cue) for comparison.
 
 ## `ConflictConfig`
 

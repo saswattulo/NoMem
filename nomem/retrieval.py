@@ -63,6 +63,14 @@ class RetrievalConfig:
     # talking, both stored as "user"): an assistant's reply to a user's turn
     # is usually advice about it, not more of the user's own facts.
     context_same_role: bool = True
+    # A question about what the assistant itself said ("the hotel you
+    # recommended", "remind me ...", "in our last chat"; see
+    # ``annotate.asks_about_assistant``) has its answer in an assistant turn,
+    # often a long one the length penalty holds back. For such a question,
+    # assistant turns' scores are multiplied by ``assistant_cue_boost``, and
+    # the reply next to a matching user turn is lifted as its neighbour even
+    # under ``context_same_role``. 1.0 turns this off.
+    assistant_cue_boost: float = 1.6
     entity_max_df: float = 0.02    # ignore entities in more than this share of messages
     max_query_terms: int = 64      # longest distinct query words sent to the keyword index
 
@@ -78,12 +86,14 @@ class RetrievalConfig:
             raise ValueError(f"ranker weights must be numbers >= 0, got {bad}")
         if self.length_penalty < 0 or self.length_pivot < 1:
             raise ValueError("length_penalty must be >= 0 and length_pivot >= 1")
+        if not self.assistant_cue_boost > 0:
+            raise ValueError(f"assistant_cue_boost must be > 0, got {self.assistant_cue_boost}")
 
     @classmethod
     def legacy(cls, **overrides) -> "RetrievalConfig":
-        """NoMem 0.2 retrieval: RRF over ranks, no length penalty, any-role neighbours."""
+        """NoMem 0.2 retrieval: RRF over ranks, no length penalty or assistant cue, any-role neighbours."""
         base = dict(
-            fusion="rrf", length_penalty=0.0, context_same_role=False,
+            fusion="rrf", length_penalty=0.0, context_same_role=False, assistant_cue_boost=1.0,
             weights={"keyword": 1.0, "entity": 0.5, "time": 0.5, "vector": 0.15, "context": 0.2, "slot": 0.5},
         )
         return cls(**(base | overrides))
@@ -156,6 +166,7 @@ class Retriever:
         # shares the question's words. Each neighbour of a top hit gains a
         # share of that hit's score (never a rank of its own, so a neighbour
         # with no evidence of its own can't outrank the hit that found it).
+        cue = c.assistant_cue_boost != 1.0 and A.asks_about_assistant(query)
         cw = c.weights.get("context", 0)
         if cw and c.context_span > 0:
             seeds = fused[: c.context_seeds]
@@ -168,7 +179,8 @@ class Retriever:
                 roles = {m.id: m.role for m in self.store.get_messages(allj).values()}
             for i, sc in seeds:
                 for j in nb.get(i, []):
-                    if c.context_same_role and roles.get(j) != roles.get(i):
+                    if c.context_same_role and roles.get(j) != roles.get(i) \
+                            and not (cue and roles.get(j) == "assistant"):
                         continue
                     acc[j] = acc.get(j, 0.0) + cw * sc
                     if j not in ctx:
@@ -194,6 +206,8 @@ class Retriever:
                 n = len(msgs[i].content)
                 if n > c.length_pivot:
                     score *= (c.length_pivot / n) ** c.length_penalty
+            if cue and msgs[i].role == "assistant":
+                score *= c.assistant_cue_boost
             if c.recency_half_life_days:
                 age_days = max(0.0, (now - msgs[i].created_at) / 86400)
                 score *= 0.5 + 0.5 * math.exp(-math.log(2) * age_days / c.recency_half_life_days)

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Assistant cue:** a question about what the assistant said ("the
+  restaurant you recommended", "in our previous conversation") now favours
+  assistant turns (x1.6) and lifts the reply next to a matching user turn.
+  LongMemEval single-session-assistant turn R@5 82.1% -> 89.3% on all 56
+  such questions (Mem0 OSS on the same 56: 85.7%), with Model2Vec; nothing
+  else moves, since the cue fires on no other LongMemEval or LoCoMo question.
+  `RetrievalConfig(assistant_cue_boost=1.0)` turns it off.
 - **Score fusion** replaces rank-only RRF: keyword and vector add their
   scores, long turns get a mild length penalty, and the neighbour lift only
   goes to turns in the same role. LongMemEval turn R@5 57.1% -> 77.7% (Mem0
