@@ -1,0 +1,37 @@
+# Changelog
+
+## 0.3.0 (unreleased)
+
+- **Packaging.** Published on PyPI as `nomem-ai` (the name `nomem` is taken
+  by an unrelated project); `import nomem` is unchanged. New extras: `mcp`,
+  `all`, `docs`.
+- **HTTP API.** `nomem serve`: a JSON API on the standard library only, with
+  optional bearer-token auth.
+- **MCP server.** `nomem mcp`: `remember`, `recall`, `search_memory`,
+  `list_facts`, `pin_fact` and `list_conflicts` tools for Claude Desktop,
+  Claude Code and other MCP clients. Works with `mcp` 1.x and 2.x.
+- **`MemoryService`.** Many users and sessions over one SQLite file, thread
+  safe, JSON-ready results.
+- **Docs site** at https://saswattulo.github.io/NoMem/.
+- **NoMem vs Mem0** benchmark (`benchmarks/mem0_compare.py`).
+- **Flexible archival slice.** `archival_max_ratio` (default 0.8) lets
+  retrieved memories stretch past the 30% slice for a direct match.
+  LongMemEval context recall 41.1% to 50.0% (rules only).
+- **LongMemEval** retrieval benchmark.
+- CI on Python 3.10 to 3.13, and a trusted-publishing release workflow.
+
+## 0.2.0
+
+- **Contradictions.** Slot, frame, update-cue and wording-change detectors;
+  both memories kept and shown with a `[CONFLICT: ...]` marker.
+- **Hybrid retrieval.** Keyword, entity, time, slot, vector and context
+  rankers fused with Reciprocal Rank Fusion; importance prior; near-duplicate
+  collapsing.
+- **Facts.** Bi-temporal slot facts with supersession; Known-facts card.
+- **Optional vectors.** `Model2VecEmbedder` (potion-base-8M) by default.
+- **Extractive compactor**, rule-based annotations, benchmark harness.
+
+## 0.1.0
+
+- Token-budgeted working memory, SQLite persistence, user and session
+  scoping, FTS5 archival search, full transparency log.

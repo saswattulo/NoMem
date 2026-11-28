@@ -10,8 +10,11 @@ assembled at read time.
 > incoherent long conversations, and black-box "memory" you can't inspect.
 > NoMem gives you a hard token budget and a full audit trail of every decision.
 
-**Status:** `v0.2` — Milestones 1–3 (core engine, hybrid retrieval, LLM-free
-facts and compaction). See the [roadmap](#roadmap) and [benchmarks](#benchmarks).
+**Docs:** https://saswattulo.github.io/NoMem/ ·
+**PyPI:** [`nomem-ai`](https://pypi.org/project/nomem-ai/) ·
+**Status:** `v0.3`: core engine, hybrid retrieval, LLM-free facts and
+contradictions, an HTTP API and an MCP server. See the [roadmap](#roadmap),
+[benchmarks](#benchmarks) and [NoMem vs Mem0](#nomem-vs-mem0).
 
 ## Why NoMem
 
@@ -34,13 +37,15 @@ facts and compaction). See the [roadmap](#roadmap) and [benchmarks](#benchmarks)
 ## Install
 
 ```bash
-pip install nomem            # core: zero dependencies
-pip install nomem[openai]    # exact local token counts via tiktoken
-pip install nomem[anthropic] # exact token counts via the Anthropic API
-pip install nomem[embed]     # optional vector retrieval (Model2Vec, CPU-only)
+pip install nomem-ai              # core: zero dependencies
+pip install "nomem-ai[openai]"    # exact local token counts via tiktoken
+pip install "nomem-ai[anthropic]" # exact token counts via the Anthropic API
+pip install "nomem-ai[embed]"     # optional vector retrieval (Model2Vec, CPU-only)
+pip install "nomem-ai[mcp]"       # the MCP server
 ```
 
-*(Pre-release: install from source with `pip install -e .`)*
+The PyPI name is `nomem-ai` (`nomem` belongs to an unrelated project); you
+still `import nomem`. From source: `pip install -e .`
 
 ## Quickstart
 
@@ -212,6 +217,21 @@ model (raise the vector weight for a stronger encoder); subclass `Embedder`
 for anything else. `HashingEmbedder` (character n-grams, no model) exists for
 offline use and tests.
 
+## HTTP API and MCP server
+
+```bash
+nomem serve --db memory.db                 # JSON API on http://127.0.0.1:8420
+nomem mcp --db ~/.nomem/memory.db          # MCP server over stdio
+claude mcp add nomem -- nomem mcp --db ~/.nomem/memory.db   # Claude Code
+```
+
+The HTTP API (`/v1/messages`, `/v1/context`, `/v1/search`, `/v1/facts`,
+`/v1/conflicts`) uses the standard library only and takes an optional bearer
+token (`--api-key` or `$NOMEM_API_KEY`). The MCP server gives any client
+`remember`, `recall`, `search_memory`, `list_facts`, `pin_fact` and
+`list_conflicts` tools. Both serve many users and sessions from one SQLite
+file through `MemoryService`. See the [server docs](https://saswattulo.github.io/NoMem/server/).
+
 ## Design choices
 
 - **Pluggable token counting.** `TokenCounter` interface with `OpenAICounter`
@@ -261,6 +281,8 @@ top 5 turns and the 1,000-token context?
 - **M3.5 — Contradictions** ✅ Slot, frame, update-cue and wording-change conflict detection;
   both memories surfaced with dates and a conflict marker; updated-facts
   benchmark.
+- **M3.6 — Packaging** ✅ PyPI (`nomem-ai`), `nomem serve` HTTP API, `nomem mcp`
+  MCP server, docs site.
 - **M4 — Adapters & polish** LangChain `BaseMemory` adapter, tool-output
   isolation helper, demo notebook.
 - **M5 — Optional encoders** GLiNER entities and a co-occurrence graph with
