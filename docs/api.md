@@ -15,6 +15,8 @@ The engine for one `user_id` and `session_id`. Constructor arguments are in
 | `add_user(content, **kw)` | `Message` | `add("user", ...)` |
 | `add_assistant(content, **kw)` | `Message` | `add("assistant", ...)` |
 | `remember(key, value)` | `None` | Pin a durable fact for this user. |
+| `forget(message_ids)` | `int` | Delete messages (an id or a list) and everything derived from them. Facts they had replaced become current again. |
+| `forget_session()` | `int` | Delete every message of this user and session. Pinned facts stay. |
 
 ### Reading
 

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Saswat Tulo", email = "tulosaswat@gmail.com" }]
-keywords = ["llm", "memory", "agent-memory", "context", "agents", "rag", "mcp", "context-engineering", "mem0-alternative"]
+keywords = ["llm", "memory", "agent-memory", "context", "agents", "rag", "mcp", "langchain", "langgraph", "openai-agents", "llamaindex", "crewai", "context-engineering", "mem0-alternative"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -29,7 +29,11 @@ dependencies = []
 [project.optional-dependencies]
 openai = ["tiktoken>=0.5"]
 anthropic = ["anthropic>=0.39"]
-langchain = ["langchain-core>=0.1"]
+langchain = ["langchain-core>=0.3"]
+langgraph = ["langgraph>=0.3", "langchain-core>=0.3"]
+openai-agents = ["openai-agents>=0.2"]
+llamaindex = ["llama-index-core>=0.12"]
+crewai = ["crewai>=0.100"]
 embed = ["model2vec>=0.4", "numpy>=1.24"]
 mcp = ["mcp>=1.2"]
 all = ["tiktoken>=0.5", "model2vec>=0.4", "numpy>=1.24", "mcp>=1.2"]

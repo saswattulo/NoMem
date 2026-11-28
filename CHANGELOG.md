@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Framework adapters** in `nomem.integrations`, each an optional extra:
+  Claude API (`AnthropicMemory`: context for `messages.create`, tools, a
+  `tool_use` handler, tool-runner tools), OpenAI Agents SDK (`NoMemSession`,
+  `memory_tools`), LangChain (`NoMemChatMessageHistory`, `NoMemRetriever`,
+  `memory_tools`), LangGraph (`NoMemStore`, a `BaseStore`; `NoMemGraphMemory`),
+  LlamaIndex (`memory_tools`, `NoMemMemoryBlock`) and CrewAI (`memory_tools`).
+  All share `MemoryToolkit`: the MCP server's tools, which never raise into
+  the agent loop.
+- **Forgetting.** `NoMem.forget(ids)` and `forget_session()` delete messages
+  with their index entries, vectors, facts and conflict links;
+  `MemoryService.forget()` and `clear()`.
 - Text-only logo: `nomem logo`, and a startup banner for `nomem serve` and
   `nomem mcp` (`--quiet` to skip).
 - NoMem vs Mem0 comparison page in the docs.
