@@ -41,7 +41,7 @@ or the query string for `GET`), both defaulting to `"default"`.
 | --- | --- | --- | --- |
 | `GET` | `/health` | | `{"status": "ok", "version": "0.3.0"}` (no auth) |
 | `POST` | `/v1/messages` | `{"role", "content", "timestamp"?, "metadata"?}` or `{"messages": [...]}` | The stored message(s) with `id` and any `conflicts` |
-| `POST` | `/v1/context` | `{"query"?, "max_tokens"?, "explain"?}` | `{"text", "messages", "tokens_used", "max_tokens"}`, plus `explain` and `log` if asked |
+| `POST` | `/v1/context` | `{"query"?, "max_tokens"?, "explain"?}` | `{"text", "messages", "tokens_used", "max_tokens", "usage"}`, plus `explain` and `log` if asked |
 | `POST` | `/v1/search` | `{"query", "k"?}` | `{"hits": [{id, role, content, created_at, score, reasons}]}` |
 | `GET` | `/v1/facts` | `?history=true` | `{"facts": [...], "pinned": {...}}` |
 | `POST` | `/v1/facts` | `{"key", "value"}` | The pinned fact |
@@ -67,7 +67,8 @@ curl -s localhost:8420/v1/context \
     {"role": "user", "content": "I am allergic to peanuts."}
   ],
   "tokens_used": 31,
-  "max_tokens": 500
+  "max_tokens": 500,
+  "usage": {"core": 0, "facts": 19, "retrieved": 0, "summary": 0, "recent": 12, "free": 469}
 }
 ```
 

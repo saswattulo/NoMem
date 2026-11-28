@@ -122,7 +122,8 @@ class MemoryService:
                 raise ValueError("max_tokens must be >= 1")
             res = mem.build_context(query=query or None)
             out = {"text": res.text, "messages": res.messages,
-                   "tokens_used": res.tokens_used, "max_tokens": res.max_tokens}
+                   "tokens_used": res.tokens_used, "max_tokens": res.max_tokens,
+                   "usage": res.usage()}
             if explain:
                 out["explain"] = res.explain()
                 out["log"] = [{"action": e.action, "tier": e.tier, "detail": e.detail,
