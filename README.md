@@ -279,6 +279,22 @@ top 5 turns and the 1,000-token context?
 | Write throughput | | ~4,000 msg/s | ~1,500 msg/s |
 | Write cost | 0 model calls | 0 model calls | 1 embedding (no generative model) |
 
+## NoMem vs Mem0
+
+Same LoCoMo and LongMemEval questions, Mem0 OSS 2.2.1 with `infer=False` (its
+own hybrid search, no LLM) against NoMem, same encoder:
+
+| | NoMem | Mem0 |
+| --- | --- | --- |
+| LoCoMo search recall@5 (potion-base-8M) | **58.6%** | 55.9% |
+| LongMemEval session recall@5 | **92.8%** | 92.2% |
+| LongMemEval turn recall@5 | 57.1% | **69.0%** |
+| Write / search latency, p50 | **0.6 / 6 ms** | 10 / 72 ms |
+| LLM calls per write as normally used | **0** | 1 |
+
+Method, every table and why Mem0's published 92.5 / 94.4 are a different
+metric: [`benchmarks/MEM0_COMPARISON.md`](benchmarks/MEM0_COMPARISON.md).
+
 ## Roadmap
 
 - **M1 — Core engine** ✅ Token-budgeted working memory, SQLite persistence,

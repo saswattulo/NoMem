@@ -62,7 +62,7 @@ curl -L -o benchmarks/data/longmemeval_s_cleaned.json \
 python benchmarks/run_all.py                         # ~1-2 minutes
 python benchmarks/run_all.py --embedder model2vec    # with the vector ranker
 python benchmarks/run_all.py --longmemeval-limit 0   # all 470 LongMemEval questions
-python benchmarks/mem0_compare.py                    # NoMem vs Mem0
+python benchmarks/mem0_bench.py --system nomem --embedder potion   # NoMem vs Mem0
 ```
 
 All runs use the deterministic `ApproxCounter`, so numbers are reproducible.
