@@ -139,3 +139,60 @@ context recall moves by up to 3.4 points per type because conflict markers now
 take some of the budget. LoCoMo, stress, invariants and the updated-facts
 benchmark are unchanged by step 10 (same numbers as step 9, with and without
 Model2Vec).
+
+## Flexible archival slice (step 11)
+
+Before step 11 retrieved memories got a fixed 30% of the post-core budget, and
+a match that didn't fit was skipped, even when the recent window held only
+older, unrelated turns. LongMemEval showed the cost: the right turn was often
+found but too long to fit (single-session-assistant: turn R@10 93, ctx 16).
+
+Now the slice can stretch, up to `archival_max_ratio` (default 0.8) of the
+budget, taking tokens from the oldest turns of the recent window. `max_tokens`
+is still a hard cap (0 violations in 500 randomised trials, which now also
+vary `archival_max_ratio`). Rules:
+
+1. The fixed slice is filled first exactly as before; stretching only adds
+   matches that it passed over, best first, so it never displaces one.
+2. Only for direct matches: never for a turn found only as the neighbour of
+   another match (`context` ranker), and never for a turn the window already
+   shows with the fixed slice (that would just move it).
+3. Every stretch is logged: `slice stretched 31 -> 55 tok, taken from the recent window`.
+
+Rule 2 came from the README demo, where a first version stretched for a
+neighbour-only turn and dropped a more useful recent one. It costs nothing on
+either benchmark.
+
+LoCoMo is flat for any ceiling from 0.45 to 0.8. 0.6 was proposed first (it
+leaves 40% of the budget for recent conversation); the default is 0.8 by
+Saswat's choice, after seeing that LongMemEval gains more from it.
+
+| Ablation (keyword only) | LoCoMo ctx | LongMemEval ctx (100-q spread) |
+| --- | --- | --- |
+| 11a. Fixed slice (`archival_max_ratio=0.3`, old behaviour) | 57.6 | 42.0 |
+| 11b. Stretch in rank order, one pass, ceiling 0.6 | 58.1 | 43.7 (single-session-user 75 -> 61: a long wrong match at rank 1 crowded out short right ones) |
+| 11c. Two passes (fill fixed slice first, then stretch), ceiling 0.45 | 58.1 | 48.2 |
+| 11d. Two passes, ceiling 0.6 | 58.1 | 49.9 |
+| 11e. Two passes, ceiling 0.8 | 58.1 | 54.4 |
+| 11f. Two passes, ceiling 0.6, stretch only for the top half of ranks | 57.6 | 44.2 |
+| 11g. Two passes, ceiling 0.6, direct matches only (rule 2) | 58.1 | 49.9 |
+| 11. Two passes, ceiling 0.8, direct matches only (rule 2) | **58.1** | **54.4** |
+
+Full runs at the step 11 defaults (search recall is unchanged; only what
+reaches the context moves):
+
+| Benchmark | Keyword only: ctx before -> 0.6 -> **0.8** | + Model2Vec: ctx before -> 0.6 -> **0.8** |
+| --- | --- | --- |
+| LoCoMo (1,531 q) | 57.6 -> 58.1 -> **58.1** | 59.7 -> 59.9 -> **59.9** |
+| LongMemEval (470 q) | 41.1 -> 47.7 -> **50.0** | 44.2 -> 51.1 -> **53.2** |
+| single-session-user | 78.1 -> 84.4 -> 85.9 | 82.8 -> 89.8 -> 89.8 |
+| single-session-assistant | 16.1 -> 41.1 -> 57.1 | 19.6 -> 41.1 -> 60.7 |
+| single-session-preference | 36.7 -> 40.0 -> 40.0 | 35.0 -> 38.3 -> 38.3 |
+| multi-session | 31.4 -> 34.4 -> 34.8 | 34.5 -> 38.1 -> 38.1 |
+| knowledge-update | 44.7 -> 52.1 -> 52.8 | 43.1 -> 51.9 -> 50.5 |
+| temporal-reasoning | 41.7 -> 44.1 -> 44.1 | 47.8 -> 50.8 -> 50.8 |
+
+Stress, invariants and the updated-facts benchmark are unchanged. Context
+recall is still well below turn R@10 (50.0 vs 74.5): `retrieval_top_k=5` still
+caps how many matches are considered. At 0.8 a long match can leave only 20%
+of the budget for recent conversation; set `archival_max_ratio=0.6` to keep more.

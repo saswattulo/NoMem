@@ -48,6 +48,11 @@ class NoMem:
         archival_ratio: Fraction of the post-core budget reserved for
             retrieved memories when a ``query`` is given (the rest goes to
             recent conversation; unused reservation rolls over to it).
+        archival_max_ratio: How far retrieval may stretch past
+            ``archival_ratio`` when a matching memory doesn't fit the reserved
+            slice: up to this fraction of the post-core budget, taken from the
+            recent window. ``max_tokens`` is never exceeded either way. Set it
+            equal to ``archival_ratio`` (or lower) for a fixed slice.
         retrieval: Tuning for the hybrid retriever (see
             :class:`~nomem.retrieval.RetrievalConfig`).
         embedder: Optional :class:`~nomem.embed.Embedder` adding semantic
@@ -80,6 +85,7 @@ class NoMem:
         counter: Optional[TokenCounter] = None,
         retrieval_top_k: int = 5,
         archival_ratio: float = 0.3,
+        archival_max_ratio: float = 0.8,
         retrieval: Optional[RetrievalConfig] = None,
         embedder=None,
         annotate: bool = True,
@@ -96,6 +102,8 @@ class NoMem:
             raise ValueError(f"facts_ratio must be within [0.0, 1.0], got {facts_ratio}")
         if not 0.0 <= archival_ratio <= 1.0:
             raise ValueError(f"archival_ratio must be within [0.0, 1.0], got {archival_ratio}")
+        if not 0.0 <= archival_max_ratio <= 1.0:
+            raise ValueError(f"archival_max_ratio must be within [0.0, 1.0], got {archival_max_ratio}")
         if retrieval_top_k < 0:
             raise ValueError(f"retrieval_top_k must be >= 0, got {retrieval_top_k}")
         self.max_tokens = max_tokens
@@ -105,6 +113,7 @@ class NoMem:
         self.counter = counter or default_counter()
         self.retrieval_top_k = retrieval_top_k
         self.archival_ratio = archival_ratio
+        self.archival_max_ratio = archival_max_ratio
         self._owns_store = not isinstance(db, SQLiteStore)
         self.store = db if isinstance(db, SQLiteStore) else SQLiteStore(db)
         self._log: list[LogEntry] = []
@@ -309,9 +318,10 @@ class NoMem:
         retrieved_ids: set[int] = set()
         if query and self.retrieval_top_k > 0 and self.archival_ratio > 0 and budget > 0:
             cap = int(budget * self.archival_ratio)
+            flex = max(cap, int(budget * self.archival_max_ratio))
             if cap > 0:
                 retrieved, retrieved_ids, r_used, r_reserved = self._resolve_archival(
-                    query, recent, budget, cap, log
+                    query, recent, budget, cap, flex, log
                 )
                 used += r_used
                 budget -= r_reserved
@@ -355,6 +365,7 @@ class NoMem:
         recent: list[Message],
         budget: int,
         cap: int,
+        flex: int,
         log: list[LogEntry],
     ):
         """Settle retrieval against the recent window it shares a budget with.
@@ -370,6 +381,9 @@ class NoMem:
         fit as a recent turn — which leaves a hole in the middle of the
         conversation and quotes the missing turn out of order above it.
 
+        ``cap`` is the reserved slice and ``flex`` the most retrieval may
+        stretch to for a match that doesn't fit it (see ``archival_max_ratio``).
+
         Returns the retrieved messages, their ids, the tokens they actually
         cost, and the reservation to charge the window (equal, once settled).
         """
@@ -382,10 +396,13 @@ class NoMem:
         self._why = {h.message.id: ", ".join(h.reasons) for h in hits}
         candidates = [h.message for h in hits]
 
-        spend = cap
+        # Turns the window shows when only the fixed slice is reserved.
+        # Stretching for one of those would just move it out of the window.
+        shown = self._window_ids(recent, budget - cap) if flex > cap else set()
+        spend = flex
         for _ in range(self.retrieval_top_k + 2):
             window = self._window_ids(recent, budget - spend)
-            settled = self._retrieve(candidates, cap, window, [])[2]
+            settled = self._retrieve(candidates, cap, flex, window, [], shown)[2]
             if settled == spend:
                 break
             spend = settled
@@ -394,40 +411,85 @@ class NoMem:
             # ones in, so the spend can oscillate rather than converge. Fall
             # back to reserving the whole slice — the window then cannot
             # outgrow the exclusion set, at the cost of any unused rollover.
-            spend = cap
+            spend = flex
 
         # Replay the settled pass, this time onto the real log.
         window = self._window_ids(recent, budget - spend)
-        retrieved, ids, used = self._retrieve(candidates, cap, window, log)
+        retrieved, ids, used = self._retrieve(candidates, cap, flex, window, log, shown)
         return retrieved, ids, used, spend
 
     def _retrieve(
         self,
         candidates: list[Message],
         cap: int,
+        flex: int,
         exclude: set[int],
         log: list[LogEntry],
+        shown: Union[set[int], frozenset[int]] = frozenset(),
     ):
-        """Greedily fill up to ``cap`` tokens with the best archival matches."""
+        """Greedily fill up to ``cap`` tokens with the best archival matches.
+
+        Two passes. The first fills the reserved ``cap`` in rank order,
+        passing over matches that don't fit, exactly as a fixed slice would.
+        The second goes back to the matches it passed over, best first, and
+        takes each that fits ``flex``: the slice stretches by what that match
+        needs and the recent window gives the tokens up. So stretching only
+        ever adds to what the fixed slice holds, never displaces it.
+
+        Stretching costs recent turns, so it is kept for direct matches:
+        never for one found only as the neighbour of another match
+        (``context`` ranker), and never for one in ``shown`` (a turn the
+        window holds with only the fixed slice reserved), which would just
+        move it out of the window.
+        """
+        why = getattr(self, "_why", {})
+        rank = {m.id: i for i, m in enumerate(candidates)}
         included: list[Message] = []
+        passed: list[Message] = []
         used = 0
+
+        def cost_with(m: Message) -> int:
+            items = sorted(included + [m], key=lambda x: rank[x.id])
+            return self.counter.count_message("system", self._retrieved_block(items)["content"])
+
         for m in candidates:
             if m.id in exclude:
                 log.append(LogEntry("skipped", "archival",
                     f"{m.role} message #{m.id} (already in the recent window)", 0, cap - used, m.id))
                 continue
-            cost = self.counter.count_message("system", self._retrieved_block(included + [m])["content"])
+            cost = cost_with(m)
             if cost <= cap:
                 log.append(LogEntry("retrieved", "archival",
-                    f"{m.role} message #{m.id} (matched by {getattr(self, '_why', {}).get(m.id) or 'relevance'})",
+                    f"{m.role} message #{m.id} (matched by {why.get(m.id) or 'relevance'})",
                     cost - used, cap - cost, m.id))
                 included.append(m)
                 used = cost
             else:
+                passed.append(m)
+        for m in passed:
+            if m.id in shown:
+                log.append(LogEntry("skipped", "archival",
+                    f"{m.role} message #{m.id} (no stretch: a recent turn the fixed slice leaves in the window)",
+                    0, max(cap, used) - used, m.id))
+                continue
+            found_by = [x for x in why.get(m.id, "").split(", ") if x]
+            strong = any(not x.startswith(("context#", "repeats ")) for x in found_by) or not found_by
+            cost = cost_with(m) if flex > cap and strong else flex + 1
+            if cost <= flex:
+                log.append(LogEntry("retrieved", "archival",
+                    f"{m.role} message #{m.id} (matched by {why.get(m.id) or 'relevance'}; "
+                    f"slice stretched {max(cap, used)} -> {cost} tok, taken from the recent window)",
+                    cost - used, flex - cost, m.id))
+                included.append(m)
+                used = cost
+            else:
+                limit = f"the {flex}-tok archival limit" if flex > cap and strong else f"{cap}-tok archival budget"
                 log.append(LogEntry("dropped", "archival",
-                    f"{m.role} message #{m.id} (would exceed {cap}-tok archival budget)", cost - used, cap - used, m.id))
+                    f"{m.role} message #{m.id} (would exceed {limit})",
+                    max(0, cost_with(m) - used), max(cap, used) - used, m.id))
+        included.sort(key=lambda x: rank[x.id])
         log.append(LogEntry("retrieval", "archival",
-            f"retrieved {len(included)} of {len(candidates)} match(es) for query", used, cap - used))
+            f"retrieved {len(included)} of {len(candidates)} match(es) for query", used, max(cap, used) - used))
         return included, {m.id for m in included}, used
 
     def _window_limit(self) -> int:

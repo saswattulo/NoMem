@@ -197,6 +197,8 @@ def test_invalid_config_raises():
         make(archival_ratio=-0.1)
     with pytest.raises(ValueError):
         make(retrieval_top_k=-1)
+    with pytest.raises(ValueError):
+        make(archival_max_ratio=1.2)
 
 
 def test_budget_holds_at_full_archival_ratio():
@@ -344,3 +346,74 @@ def test_build_context_reads_the_message_list_once(monkeypatch):
     )
     mem.build_context(query="tokyo trip planning")
     assert len(calls) == 1
+
+
+# -- flexible archival slice ---------------------------------------------------
+
+def _long_match_setup(**kw):
+    mem = make(max_tokens=400, facts_ratio=0, **kw)
+    mem.add_user("the pangolin sanctuary " + "details " * 12 + "end")  # ~120 tokens
+    for i in range(40):
+        mem.add_user(f"filler chat {i}")
+    return mem
+
+
+def test_long_match_stretches_the_archival_slice():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    long_text = _long_match_setup().store.search("default", "default", "pangolin sanctuary", 1)[0].content
+    # Fixed 30% slice (120 tok): the match plus its block header doesn't fit.
+    fixed = _long_match_setup(archival_max_ratio=0.3).build_context(query="pangolin sanctuary")
+    assert long_text not in fixed.text
+    # Default: the slice may stretch to 60%, taking tokens from the window.
+    res = _long_match_setup().build_context(query="pangolin sanctuary")
+    assert long_text in res.text
+    assert res.tokens_used <= 400
+    assert any("slice stretched" in e.detail for e in res.log)
+
+
+def test_stretching_never_displaces_matches_that_fit_the_slice():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    def build(**kw):
+        mem = make(max_tokens=400, facts_ratio=0, **kw)
+        mem.add_user("pangolin sanctuary " * 9 + "visit")   # long, ranks first
+        mem.add_user("pangolin sanctuary opens at nine")     # short
+        for i in range(40):
+            mem.add_user(f"filler chat {i}")
+        return mem.build_context(query="pangolin sanctuary")
+    fixed, flex = build(archival_max_ratio=0.3), build()
+    assert "pangolin sanctuary opens at nine" in fixed.text
+    assert "pangolin sanctuary opens at nine" in flex.text
+    assert flex.tokens_used <= 400
+
+
+def test_budget_holds_when_the_slice_stretches_to_everything():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    mem = make(max_tokens=150, archival_ratio=0.1, archival_max_ratio=1.0)
+    for i in range(30):
+        mem.add_user(f"tokyo trip note number {i} " + "x" * (i % 7) * 5)
+    result = mem.build_context(query="tokyo trip note")
+    assert result.tokens_used <= 150
+    assert len(result.text) <= 150
+
+
+def test_no_stretch_for_a_turn_found_only_as_a_neighbour():
+    if not _fts_available():
+        pytest.skip("FTS5 not available in this SQLite build")
+    from nomem import ApproxCounter
+    mem = NoMem(max_tokens=120, core="You are a concise travel assistant.", counter=ApproxCounter())
+    for role, text in [
+        ("user", "Hi! I'm planning a trip to Tokyo."),
+        ("assistant", "Exciting! When are you thinking of going?"),
+        ("user", "Early March, for about a week, budget around $2000."),
+        ("assistant", "Great — cherry blossoms start late March, so you may be a touch early."),
+        ("user", "Good to know. What neighborhoods should I stay in?"),
+        ("assistant", "Shinjuku and Shibuya are lively; Asakusa is more traditional."),
+        ("user", "Let's go with Shinjuku. Any food I must try?"),
+    ]:
+        mem.add(role, text)
+    res = mem.build_context(query="where am I staying and what's my budget?")
+    assert not any("slice stretched" in e.detail for e in res.log)
+    assert "What neighborhoods should I stay in?" in res.text

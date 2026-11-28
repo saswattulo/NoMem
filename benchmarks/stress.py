@@ -102,6 +102,7 @@ def invariants(trials: int, seed: int = 1, mem_kwargs=None) -> dict:
             counter=ApproxCounter(),
             retrieval_top_k=rng.randint(0, 8),
             archival_ratio=rng.choice([0.0, 0.1, 0.3, 0.5, 1.0]),
+            archival_max_ratio=rng.choice([0.0, 0.3, 0.6, 0.8, 1.0]),
             facts_ratio=rng.choice([0.0, 0.1, 0.3]),
             summary_ratio=rng.choice([0.0, 0.0, 0.1, 0.3]),
             **(mem_kwargs or {}),
