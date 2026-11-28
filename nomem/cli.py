@@ -55,12 +55,11 @@ def main(argv=None) -> int:
     service = MemoryService(args.db, max_tokens=args.max_tokens, core=args.core,
                             embedder=args.embedder)
     if not args.quiet:
-        from .banner import print_chip
+        from .banner import print_banner
 
-        where = (f"http://{args.host}:{args.port}" if args.cmd == "serve"
+        where = (f"HTTP API on http://{args.host}:{args.port}" if args.cmd == "serve"
                  else f"MCP over {args.transport} · user {args.user_id}")
-        print_chip(["LLM-free memory for agents",
-                    f"{where} · {args.db} · {args.max_tokens}-token budget"])
+        print_banner([where, f"{args.db} · {args.max_tokens}-token budget"])
     if args.cmd == "serve":
         from .http_api import serve
 

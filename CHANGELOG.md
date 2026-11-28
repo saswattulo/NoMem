@@ -2,8 +2,13 @@
 
 ## Unreleased
 
-- Text-only logo: `nomem logo`, and a startup banner for `nomem serve` and
-  `nomem mcp` (`--quiet` to skip).
+- Text-only logo (thin `nomem` over a budget bar): `nomem logo`, the README,
+  the docs, and a startup banner for `nomem serve` and `nomem mcp`
+  (`--quiet` to skip).
+- Budget readouts: `explain()` now opens with a token gauge and a budget map
+  (one cell per 1/30th of the budget, by core, facts, retrieved, summary and
+  recent turns); `ContextResult.usage()`, `gauge()` and `budget_map()`; the
+  HTTP `/v1/context` response includes `usage`.
 - NoMem vs Mem0 comparison page in the docs.
 
 ## 0.3.0

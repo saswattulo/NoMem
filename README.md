@@ -1,10 +1,10 @@
 # NoMem — Not Only Memory
 
 ```text
-█▀▀▄ ▄▀▀▄ █▀▄▀▄ ▄▀▀▄ █▀▄▀▄
-█  █ █  █ █ █ █ █▀▀▀ █ █ █
-▀  ▀  ▀▀  ▀   ▀  ▀▀▀ ▀   ▀
-LLM-free memory for agents
+┏┓╻┏━┓┏┳┓┏━╸┏┳┓
+┃┗┫┃ ┃┃┃┃┣╸ ┃┃┃
+╹ ╹┗━┛╹ ╹┗━╸╹ ╹
+▀▀▀▀▀▀▀▀▀▀▀▀▔▔▔ LLM-free memory for agents
 ```
 
 A transparent, token-budgeted **memory layer for agentic and RAG applications**.
@@ -83,8 +83,9 @@ the fuller demo (`python examples/basic_usage.py`), where the budget forces
 drops and retrieval pulls an already-dropped fact back in:
 
 ```
-context: 102/120 tokens, 5 messages
------------------------------------
+context ▕██████████████████████████░░░░▏ 102/120 tokens, 5 messages
+budget  ◆◆◆◆■■■■■■■■▪▪▪▪▪▪▪▪▪▪▪▪▪▪····  ◆ core 15  ■ retrieved 31  ▪ recent 56  · free 18
+----------------------------------------------------------------
 core             core         15t [105 left]  included fixed core memory
 retrieved        archival     31t [0 left]  user message #3 (matched by keyword#1)
 skipped          archival      0t [0 left]  user message #7 (already in the recent window)
