@@ -12,24 +12,18 @@ import sys
 from typing import Optional, TextIO
 
 _NO = [
-    "███╗   ██╗ ██████╗ ",
-    "████╗  ██║██╔═══██╗",
-    "██╔██╗ ██║██║   ██║",
-    "██║╚██╗██║██║   ██║",
-    "██║ ╚████║╚██████╔╝",
-    "╚═╝  ╚═══╝ ╚═════╝ ",
+    "█▀▀▄ ▄▀▀▄ ",
+    "█  █ █  █ ",
+    "▀  ▀  ▀▀  ",
 ]
 _MEM = [
-    "███╗   ███╗███████╗███╗   ███╗",
-    "████╗ ████║██╔════╝████╗ ████║",
-    "██╔████╔██║█████╗  ██╔████╔██║",
-    "██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║",
-    "██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║",
-    "╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝",
+    "█▀▄▀▄ ▄▀▀▄ █▀▄▀▄",
+    "█ █ █ █▀▀▀ █ █ █",
+    "▀   ▀  ▀▀▀ ▀   ▀",
 ]
-TAGLINE = "memory for agents · no LLM in the loop"
+TAGLINE = "LLM-free memory for agents"
 
-WORDMARK = "\n".join(a + b for a, b in zip(_NO, _MEM)) + "\n  " + TAGLINE
+WORDMARK = "\n".join((a + b).rstrip() for a, b in zip(_NO, _MEM)) + "\n" + TAGLINE
 
 _TEAL, _BRIGHT, _DIM, _BOLD, _RESET = "\033[38;5;43m", "\033[38;5;86m", "\033[2m", "\033[1m", "\033[0m"
 
@@ -42,7 +36,7 @@ def wordmark(color: bool = False) -> str:
     if not color:
         return WORDMARK
     rows = [f"{_TEAL}{a}{_RESET}{_BOLD}{b}{_RESET}" for a, b in zip(_NO, _MEM)]
-    return "\n".join(rows) + f"\n  {_DIM}{TAGLINE}{_RESET}"
+    return "\n".join(rows) + f"\n{_DIM}{TAGLINE}{_RESET}"
 
 
 def chip(lines: list[str], title: str = "nomem", version: str = "", color: bool = False) -> str:

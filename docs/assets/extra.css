@@ -55,7 +55,7 @@
 
 .md-typeset pre.nm-logo {
   font-family: "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
-  font-size: clamp(5px, 1.55vw, 13px); line-height: 1.05; margin: 0 0 1.2rem;
+  font-size: clamp(14px, 4vw, 26px); line-height: 1.0; margin: 0 0 1.2rem;
   background: none; padding: 0; color: var(--md-default-fg-color); white-space: pre; overflow: hidden;
 }
 .md-typeset pre.nm-logo .nm-no { color: var(--md-primary-fg-color); }
