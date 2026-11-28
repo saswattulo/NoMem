@@ -15,6 +15,8 @@ The engine for one `user_id` and `session_id`. Constructor arguments are in
 | `add_user(content, **kw)` | `Message` | `add("user", ...)` |
 | `add_assistant(content, **kw)` | `Message` | `add("assistant", ...)` |
 | `remember(key, value)` | `None` | Pin a durable fact for this user. |
+| `forget(message_ids)` | `int` | Delete messages (an id or a list) and everything derived from them. Facts they had replaced become current again. |
+| `forget_session()` | `int` | Delete every message of this user and session. Pinned facts stay. |
 
 ### Reading
 
@@ -61,7 +63,14 @@ dict has `older_id`, `newer_id`, `older`, `newer`, `older_at`, `newer_at`,
 | `max_tokens` | The budget it was built for |
 | `log` | `list[LogEntry]` |
 
-`explain()` returns the log as a readable table; `str(result)` is `text`.
+| Method | Returns |
+| --- | --- |
+| `explain(color=False)` | The budget gauge, the budget map and the log as a readable table |
+| `usage()` | `{"core", "facts", "retrieved", "summary", "recent", "free"}` in tokens |
+| `gauge(width=30, color=False)` | `▕█████████████████████████░░░░░▏ 286/300 tokens` |
+| `budget_map(width=30, color=False)` | `◆●●●■■■■■■■■■■■■▪▪▪▪▪▪▪▪▪▪▪▪▪·` plus a legend with token counts |
+
+`str(result)` is `text`.
 
 ### `LogEntry`
 

@@ -141,3 +141,13 @@ def test_nan_vectors_do_not_poison_results():
     m = mem(embedder=NanEmbedder())
     msg = m.add("user", "the dog is named Rex")
     assert [h.id for h in m.search("dog", 5)] == [msg.id]
+
+
+def test_forget_drops_cached_vectors():
+    m = mem(embedder=HashingEmbedder())
+    gone = m.add("user", "my locker code is 4471")
+    m.add("user", "the weather is nice")
+    assert gone.id in [h.id for h in m.search("locker code", 5)]  # fills the vector cache
+    m.forget([gone.id])
+    assert gone.id not in [h.id for h in m.search("locker code", 5)]
+    assert gone.id not in [i for i, _ in m.embedder.similar(m.store, m.user_id, m.session_id, "locker code", 5)]

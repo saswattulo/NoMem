@@ -8,9 +8,10 @@ hide:
 
 <div class="nm-hero" markdown>
 
-<pre class="nm-logo" aria-label="NoMem"><span class="nm-no">█▀▀▄ ▄▀▀▄ </span>█▀▄▀▄ ▄▀▀▄ █▀▄▀▄
-<span class="nm-no">█  █ █  █ </span>█ █ █ █▀▀▀ █ █ █
-<span class="nm-no">▀  ▀  ▀▀  </span>▀   ▀  ▀▀▀ ▀   ▀</pre>
+<pre class="nm-logo" aria-label="NoMem"><span class="nm-no">┏┓╻┏━┓</span>┏┳┓┏━╸┏┳┓
+<span class="nm-no">┃┗┫┃ ┃</span>┃┃┃┣╸ ┃┃┃
+<span class="nm-no">╹ ╹┗━┛</span>╹ ╹┗━╸╹ ╹
+<span class="nm-no">▀▀▀▀▀▀▀▀▀▀▀▀</span><span class="nm-free">▔▔▔</span></pre>
 
 <p class="nm-eyebrow">Not Only Memory</p>
 

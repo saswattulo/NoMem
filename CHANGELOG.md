@@ -14,8 +14,24 @@
   search (it warns and falls back to keywords); stored vectors of another
   size are skipped; NaN vectors, very long queries and bad
   `RetrievalConfig` values are handled.
-- Text-only logo: `nomem logo`, and a startup banner for `nomem serve` and
-  `nomem mcp` (`--quiet` to skip).
+- **Framework adapters** in `nomem.integrations`, each an optional extra:
+  Claude API (`AnthropicMemory`: context for `messages.create`, tools, a
+  `tool_use` handler, tool-runner tools), OpenAI Agents SDK (`NoMemSession`,
+  `memory_tools`), LangChain (`NoMemChatMessageHistory`, `NoMemRetriever`,
+  `memory_tools`), LangGraph (`NoMemStore`, a `BaseStore`; `NoMemGraphMemory`),
+  LlamaIndex (`memory_tools`, `NoMemMemoryBlock`) and CrewAI (`memory_tools`).
+  All share `MemoryToolkit`: the MCP server's tools, which never raise into
+  the agent loop.
+- **Forgetting.** `NoMem.forget(ids)` and `forget_session()` delete messages
+  with their index entries, vectors, facts and conflict links;
+  `MemoryService.forget()` and `clear()`.
+- Text-only logo (thin `nomem` over a budget bar): `nomem logo`, the README,
+  the docs, and a startup banner for `nomem serve` and `nomem mcp`
+  (`--quiet` to skip).
+- Budget readouts: `explain()` now opens with a token gauge and a budget map
+  (one cell per 1/30th of the budget, by core, facts, retrieved, summary and
+  recent turns); `ContextResult.usage()`, `gauge()` and `budget_map()`; the
+  HTTP `/v1/context` response includes `usage`.
 - NoMem vs Mem0 comparison page in the docs.
 
 ## 0.3.0

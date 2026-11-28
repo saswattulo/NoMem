@@ -524,6 +524,63 @@ class SQLiteStore:
         )
         return {r["key"]: r["value"] for r in rows}
 
+    # -- deletion and lookup (used by forget() and the framework adapters) --
+
+    def delete_messages(self, user_id: str, ids: list[int], commit: bool = True) -> int:
+        """Delete messages and everything derived from them. Returns how many went.
+
+        Slot facts a deleted message created are removed; facts it had closed
+        are reopened, so the store reads as if the message was never written.
+        """
+        ids = [int(i) for i in ids]
+        gone = 0
+        for chunk in _chunks(ids):
+            ph = ",".join("?" * len(chunk))
+            args = (user_id, *chunk)
+            cur = self.conn.execute(f"DELETE FROM messages WHERE user_id = ? AND id IN ({ph})", args)
+            gone += cur.rowcount
+            if self.fts_enabled:
+                self.conn.execute(
+                    f"DELETE FROM messages_fts WHERE user_id = ? AND message_id IN ({ph})", args)
+            for table in ("annotations", "entities", "times", "vectors", "frames"):
+                self.conn.execute(
+                    f"DELETE FROM {table} WHERE user_id = ? AND message_id IN ({ph})", args)
+            self.conn.execute(
+                f"DELETE FROM conflicts WHERE user_id = ? AND (older_id IN ({ph}) OR newer_id IN ({ph}))",
+                (user_id, *chunk, *chunk))
+            self.conn.execute(
+                f"DELETE FROM slots WHERE user_id = ? AND source_message_id IN ({ph})", args)
+            self.conn.execute(
+                f"UPDATE slots SET valid_to = NULL, closed_by = NULL"
+                f" WHERE user_id = ? AND closed_by IN ({ph})", args)
+        if commit:
+            self.conn.commit()
+        return gone
+
+    def message_ids(self, user_id: str, session_id: str) -> list[int]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT id FROM messages WHERE user_id = ? AND session_id = ? ORDER BY id",
+            (user_id, session_id))]
+
+    def user_ids(self, prefix: str = "") -> list[str]:
+        """Distinct user ids with stored messages, optionally starting with ``prefix``."""
+        esc = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT user_id FROM messages WHERE user_id LIKE ? ESCAPE '\\' ORDER BY user_id",
+            (esc + "%",))]
+
+    def messages_with_meta(self, user_id: str, session_id: str, key: str,
+                           value: Optional[str] = None) -> list[Message]:
+        """Messages whose metadata has ``key`` (equal to ``value`` if given), oldest first."""
+        path = "$." + key
+        sql = ("SELECT * FROM messages WHERE user_id = ? AND session_id = ?"
+               " AND json_extract(metadata, ?) IS NOT NULL")
+        params: list = [user_id, session_id, path]
+        if value is not None:
+            sql += " AND json_extract(metadata, ?) = ?"
+            params += [path, value]
+        return [self._row_to_message(r) for r in self.conn.execute(sql + " ORDER BY id", params)]
+
     # -- helpers ---------------------------------------------------------
 
     def _row_to_message(self, row: sqlite3.Row) -> Message:

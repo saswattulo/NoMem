@@ -109,6 +109,17 @@ class MemoryService:
             self._mem(user_id, "default").remember(key, value)
             return {"key": key, "value": value}
 
+    def forget(self, message_ids, *, user_id: str = "default", session_id: str = "default") -> dict:
+        """Delete messages by id (one id or a list). Returns how many were deleted."""
+        ids = [message_ids] if isinstance(message_ids, int) else list(message_ids or [])
+        with self._lock:
+            return {"deleted": self._mem(user_id, session_id).forget([int(i) for i in ids])}
+
+    def clear(self, *, user_id: str = "default", session_id: str = "default") -> dict:
+        """Delete every message of one user's session. Pinned facts stay."""
+        with self._lock:
+            return {"deleted": self._mem(user_id, session_id).forget_session()}
+
     # -- read ------------------------------------------------------------
 
     def context(self, query: Optional[str] = None, *, user_id: str = "default",
@@ -122,7 +133,8 @@ class MemoryService:
                 raise ValueError("max_tokens must be >= 1")
             res = mem.build_context(query=query or None)
             out = {"text": res.text, "messages": res.messages,
-                   "tokens_used": res.tokens_used, "max_tokens": res.max_tokens}
+                   "tokens_used": res.tokens_used, "max_tokens": res.max_tokens,
+                   "usage": res.usage()}
             if explain:
                 out["explain"] = res.explain()
                 out["log"] = [{"action": e.action, "tier": e.tier, "detail": e.detail,
