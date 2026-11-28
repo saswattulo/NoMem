@@ -23,3 +23,18 @@ jobs:
         run: |
           python -m build
           twine check --strict dist/*
+
+  integrations:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # CrewAI pins openai<3 and the Agents SDK needs openai>=3, so they get separate envs.
+        extras: ["anthropic,langgraph,openai-agents,llamaindex", "crewai"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,${{ matrix.extras }}]"
+      - run: pytest -q tests/test_integrations.py

@@ -52,6 +52,7 @@ nav:
       - Retrieval and vectors: retrieval.md
       - Configuration: configuration.md
       - Using it with an agent: integrations.md
+      - Framework adapters: frameworks.md
   - Server:
       - HTTP API and MCP: server.md
   - Reference:

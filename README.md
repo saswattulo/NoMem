@@ -38,8 +38,9 @@ contradictions, an HTTP API and an MCP server. See the [roadmap](#roadmap),
   conversation) → Archival (everything, retrieved on demand).
 - **Lightweight & local-first.** One SQLite file. Zero required dependencies.
   Runs offline in seconds.
-- **Harness-neutral.** A clean core with thin adapters (LangChain, LlamaIndex,
-  raw provider loops) — not tied to any one framework.
+- **Harness-neutral.** A clean core with thin adapters for the Claude API,
+  the OpenAI Agents SDK, LangChain, LangGraph, LlamaIndex and CrewAI — not
+  tied to any one framework.
 
 ## Install
 
@@ -49,6 +50,7 @@ pip install "nomem-ai[openai]"    # exact local token counts via tiktoken
 pip install "nomem-ai[anthropic]" # exact token counts via the Anthropic API
 pip install "nomem-ai[embed]"     # optional vector retrieval (Model2Vec, CPU-only)
 pip install "nomem-ai[mcp]"       # the MCP server
+pip install "nomem-ai[langgraph]" # or langchain, openai-agents, llamaindex, crewai
 ```
 
 The PyPI name is `nomem-ai` (`nomem` belongs to an unrelated project); you
@@ -240,6 +242,24 @@ token (`--api-key` or `$NOMEM_API_KEY`). The MCP server gives any client
 `list_conflicts` tools. Both serve many users and sessions from one SQLite
 file through `MemoryService`. See the [server docs](https://saswattulo.github.io/NoMem/server/).
 
+## Framework adapters
+
+```python
+from nomem import MemoryService
+from nomem.integrations.langgraph import NoMemStore              # a LangGraph BaseStore
+from nomem.integrations.openai_agents import NoMemSession        # an Agents SDK Session
+from nomem.integrations.langchain import NoMemChatMessageHistory # LangChain history
+from nomem.integrations.anthropic import AnthropicMemory         # Claude API helpers
+
+svc = MemoryService("memory.db")
+session = NoMemSession(svc, "chat-42", user_id="saswat")  # Runner.run(agent, text, session=session)
+```
+
+Every adapter also exposes the MCP server's tools (`remember`, `recall`,
+`search_memory`, `pin_fact` ...) in the framework's own tool type, and the
+tools never raise into the agent loop. See
+[Framework adapters](https://saswattulo.github.io/NoMem/frameworks/).
+
 ## Design choices
 
 - **Pluggable token counting.** `TokenCounter` interface with `OpenAICounter`
@@ -307,8 +327,9 @@ metric: [`benchmarks/MEM0_COMPARISON.md`](benchmarks/MEM0_COMPARISON.md).
   benchmark.
 - **M3.6 — Packaging** ✅ PyPI (`nomem-ai`), `nomem serve` HTTP API, `nomem mcp`
   MCP server, docs site.
-- **M4 — Adapters & polish** LangChain `BaseMemory` adapter, tool-output
-  isolation helper, demo notebook.
+- **M4 — Adapters & polish** ✅ Adapters for the Claude API, OpenAI Agents SDK,
+  LangChain, LangGraph, LlamaIndex and CrewAI; `forget()`. Still to do:
+  tool-output isolation helper, demo notebook.
 - **M5 — Optional encoders** GLiNER entities and a co-occurrence graph with
   Personalized PageRank, cross-encoder reranking (`nomem[ner]`,
   `nomem[rerank]`), pluggable pattern packs for other languages.

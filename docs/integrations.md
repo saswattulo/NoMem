@@ -1,7 +1,9 @@
 # Using it with an agent
 
 NoMem is framework-neutral: it gives you a list of messages and a string, and
-you hand them to whatever model you use. The pattern is always the same:
+you hand them to whatever model you use. For LangChain, LangGraph, the OpenAI
+Agents SDK, LlamaIndex, CrewAI and ready-made Claude helpers, see
+[Framework adapters](frameworks.md). The pattern is always the same:
 
 1. Store the user's message.
 2. Build a context for it.
@@ -92,5 +94,5 @@ in `max_tokens`. You can also subclass `TokenCounter` and implement
 ## As a tool for the agent
 
 Instead of building the context yourself, you can let the agent decide when
-to remember and recall, through the [MCP server](server.md#mcp-server) or by
-exposing `mem.add_user` and `mem.build_context` as tools in your framework.
+to remember and recall, through the [MCP server](server.md#mcp-server) or the
+same tools in your framework (see [Framework adapters](frameworks.md#the-tools)).

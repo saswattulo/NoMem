@@ -660,6 +660,32 @@ class NoMem:
     def _render(messages: list[dict]) -> str:
         return "\n".join(f"{m['role']}: {m['content']}" for m in messages)
 
+    # -- forgetting ------------------------------------------------------
+
+    def forget(self, message_ids: Union[int, list[int]]) -> int:
+        """Delete stored messages of this user, and every index built from them.
+
+        This is the one way to undo :meth:`add`: the text, its search index,
+        vectors, extracted facts and conflict links all go. Facts the message
+        had replaced become current again. Returns how many messages went.
+        """
+        ids = [message_ids] if isinstance(message_ids, int) else list(message_ids)
+        if not ids:
+            return 0
+        n = self.store.delete_messages(self.user_id, ids)
+        self._drop_vector_cache()
+        return n
+
+    def forget_session(self) -> int:
+        """Delete every message of this ``user_id`` + ``session_id``. Pinned facts stay."""
+        return self.forget(self.store.message_ids(self.user_id, self.session_id))
+
+    def _drop_vector_cache(self) -> None:
+        cache = getattr(self.embedder, "_mats", None)
+        if isinstance(cache, dict):
+            for key in [k for k in cache if k[0] == id(self.store) and k[1] == self.user_id]:
+                cache.pop(key, None)
+
     # -- introspection ---------------------------------------------------
 
     @property
