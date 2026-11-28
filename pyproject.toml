@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nomem"
-version = "0.2.0"
+name = "nomem-ai"
+version = "0.3.0"
 description = "Not Only Memory — a transparent, token-budgeted, LLM-free memory layer for agentic and RAG applications."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Saswat Tulo", email = "tulosaswat@gmail.com" }]
-keywords = ["llm", "memory", "context", "agents", "rag", "langchain", "context-engineering"]
+keywords = ["llm", "memory", "agent-memory", "context", "agents", "rag", "mcp", "context-engineering", "mem0-alternative"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -19,6 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = []
@@ -28,14 +31,26 @@ openai = ["tiktoken>=0.5"]
 anthropic = ["anthropic>=0.39"]
 langchain = ["langchain-core>=0.1"]
 embed = ["model2vec>=0.4", "numpy>=1.24"]
-dev = ["pytest>=7"]
+mcp = ["mcp>=1.2"]
+all = ["tiktoken>=0.5", "model2vec>=0.4", "numpy>=1.24", "mcp>=1.2"]
+docs = ["mkdocs-material>=9.5"]
+dev = ["pytest>=7", "build>=1", "twine>=5"]
+
+[project.scripts]
+nomem = "nomem.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/saswattulo/NoMem"
+Homepage = "https://saswattulo.github.io/NoMem/"
+Documentation = "https://saswattulo.github.io/NoMem/"
 Repository = "https://github.com/saswattulo/NoMem"
+Issues = "https://github.com/saswattulo/NoMem/issues"
+Changelog = "https://github.com/saswattulo/NoMem/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nomem"]
+
+[tool.hatch.build.targets.sdist]
+include = ["nomem", "tests", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

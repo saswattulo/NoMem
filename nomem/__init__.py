@@ -10,6 +10,7 @@ from .core import NoMem
 from .embed import Embedder, HashingEmbedder, Model2VecEmbedder, SentenceTransformerEmbedder
 from .retrieval import Hit, RetrievalConfig
 from .models import ContextResult, LogEntry, Message
+from .service import MemoryService
 from .store import SQLiteStore
 from .tokens import (
     AnthropicCounter,
@@ -19,7 +20,7 @@ from .tokens import (
     default_counter,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "NoMem",
@@ -27,6 +28,7 @@ __all__ = [
     "LogEntry",
     "ContextResult",
     "SQLiteStore",
+    "MemoryService",
     "TokenCounter",
     "ApproxCounter",
     "OpenAICounter",

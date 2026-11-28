@@ -1,0 +1,43 @@
+name: publish to PyPI
+
+# Runs when a GitHub release is published. Uses PyPI trusted publishing,
+# so no API token is stored in the repository. One-time setup on PyPI:
+# https://pypi.org/manage/account/publishing/ -> add a pending publisher with
+# project "nomem-ai", owner "saswattulo", repo "NoMem", workflow "publish.yml",
+# environment "pypi".
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nomem-ai
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
