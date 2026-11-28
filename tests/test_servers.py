@@ -114,3 +114,14 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
     assert "nomem" in capsys.readouterr().out
+
+
+def test_logo_and_banner(capsys):
+    from nomem.banner import WORDMARK, chip
+    from nomem.cli import main
+    assert main(["logo"]) == 0
+    out = capsys.readouterr().out
+    assert out.strip() == WORDMARK.strip()
+    banner = chip(["line one", "line two"], version="1.2.3")
+    assert "nomem v1.2.3" in banner and "\033" not in banner
+    assert "\033" in chip(["x"], color=True)

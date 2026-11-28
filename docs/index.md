@@ -1,5 +1,5 @@
 ---
-title: NoMem
+title: LLM-free memory for agents
 description: LLM-free memory for AI agents. Verbatim storage, a hard token budget, and a log of every decision.
 hide:
   - navigation
@@ -7,6 +7,10 @@ hide:
 ---
 
 <div class="nm-hero" markdown>
+
+<pre class="nm-logo" aria-label="NoMem"><span class="nm-no">█▀▀▄ ▄▀▀▄ </span>█▀▄▀▄ ▄▀▀▄ █▀▄▀▄
+<span class="nm-no">█  █ █  █ </span>█ █ █ █▀▀▀ █ █ █
+<span class="nm-no">▀  ▀  ▀▀  </span>▀   ▀  ▀▀▀ ▀   ▀</pre>
 
 <p class="nm-eyebrow">Not Only Memory</p>
 

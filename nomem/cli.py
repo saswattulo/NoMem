@@ -15,6 +15,7 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--embedder", default=os.environ.get("NOMEM_EMBEDDER", "none"),
                    choices=["none", "model2vec", "hashing"],
                    help="optional vector ranker (model2vec needs nomem[embed])")
+    p.add_argument("--quiet", action="store_true", help="don't print the startup banner")
 
 
 def main(argv=None) -> int:
@@ -40,12 +41,26 @@ def main(argv=None) -> int:
     m.add_argument("--host", default=None)
     m.add_argument("--port", type=int, default=None)
 
+    sub.add_parser("logo", help="print the NoMem logo")
+
     args = ap.parse_args(argv)
+    if args.cmd == "logo":
+        from .banner import use_color, wordmark
+
+        print(wordmark(use_color(sys.stdout)))
+        return 0
 
     from .service import MemoryService
 
     service = MemoryService(args.db, max_tokens=args.max_tokens, core=args.core,
                             embedder=args.embedder)
+    if not args.quiet:
+        from .banner import print_chip
+
+        where = (f"http://{args.host}:{args.port}" if args.cmd == "serve"
+                 else f"MCP over {args.transport} · user {args.user_id}")
+        print_chip(["LLM-free memory for agents",
+                    f"{where} · {args.db} · {args.max_tokens}-token budget"])
     if args.cmd == "serve":
         from .http_api import serve
 

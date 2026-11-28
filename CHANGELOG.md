@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## Unreleased
+
+- Text-only logo: `nomem logo`, and a startup banner for `nomem serve` and
+  `nomem mcp` (`--quiet` to skip).
+- NoMem vs Mem0 comparison page in the docs.
+
+## 0.3.0
 
 - **Packaging.** Published on PyPI as `nomem-ai` (the name `nomem` is taken
   by an unrelated project); `import nomem` is unchanged. New extras: `mcp`,
@@ -13,7 +19,6 @@
 - **`MemoryService`.** Many users and sessions over one SQLite file, thread
   safe, JSON-ready results.
 - **Docs site** at https://saswattulo.github.io/NoMem/.
-- **NoMem vs Mem0** benchmark (`benchmarks/mem0_compare.py`).
 - **Flexible archival slice.** `archival_max_ratio` (default 0.8) lets
   retrieved memories stretch past the 30% slice for a direct match.
   LongMemEval context recall 41.1% to 50.0% (rules only).

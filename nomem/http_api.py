@@ -23,6 +23,7 @@ the query string for GET). Set ``NOMEM_API_KEY`` (or ``--api-key``) to require
 from __future__ import annotations
 
 import hmac
+import sys
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
@@ -145,7 +146,7 @@ def serve(service: MemoryService, host: str = "127.0.0.1", port: int = 8420,
 
     httpd = ThreadingHTTPServer((host, port), make_handler(service, api_key, __version__))
     httpd.verbose = verbose
-    print(f"NoMem HTTP API on http://{host}:{port}  (Ctrl+C to stop)", flush=True)
+    print(f"NoMem HTTP API on http://{host}:{port}  (Ctrl+C to stop)", file=sys.stderr, flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
