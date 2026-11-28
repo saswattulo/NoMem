@@ -117,11 +117,30 @@ def test_cli_version(capsys):
 
 
 def test_logo_and_banner(capsys):
-    from nomem.banner import WORDMARK, chip
+    from nomem.banner import WORDMARK, banner
     from nomem.cli import main
     assert main(["logo"]) == 0
-    out = capsys.readouterr().out
-    assert out.strip() == WORDMARK.strip()
-    banner = chip(["line one", "line two"], version="1.2.3")
-    assert "nomem v1.2.3" in banner and "\033" not in banner
-    assert "\033" in chip(["x"], color=True)
+    assert capsys.readouterr().out.strip() == WORDMARK.strip()
+    b = banner(["line one", "line two"], version="1.2.3")
+    assert "v1.2.3" in b and "line two" in b and "\033" not in b
+    assert len(b.splitlines()) == 4
+    assert "\033" in banner(["x"], color=True)
+
+
+def test_budget_readouts():
+    from nomem import NoMem
+    mem = NoMem(max_tokens=200, core="You are terse.")
+    mem.add_user("I live in Pune.")
+    for i in range(30):
+        mem.add_user(f"Filler message {i} about the weather today.")
+    res = mem.build_context(query="where do I live?")
+    u = res.usage()
+    assert sum(v for k, v in u.items() if k != "free") == res.tokens_used
+    assert u["free"] == res.max_tokens - res.tokens_used
+    assert u["core"] > 0 and u["recent"] > 0
+    row = res.budget_map(width=30).split("  ")[0]
+    assert len(row) == 30 and row.startswith("◆")
+    g = res.gauge(width=20)
+    assert g.startswith("▕") and f"{res.tokens_used}/200 tokens" in g
+    assert res.explain().splitlines()[0].startswith("context ▕")
+    assert "\033" in res.explain(color=True)

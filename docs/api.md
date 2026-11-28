@@ -63,7 +63,14 @@ dict has `older_id`, `newer_id`, `older`, `newer`, `older_at`, `newer_at`,
 | `max_tokens` | The budget it was built for |
 | `log` | `list[LogEntry]` |
 
-`explain()` returns the log as a readable table; `str(result)` is `text`.
+| Method | Returns |
+| --- | --- |
+| `explain(color=False)` | The budget gauge, the budget map and the log as a readable table |
+| `usage()` | `{"core", "facts", "retrieved", "summary", "recent", "free"}` in tokens |
+| `gauge(width=30, color=False)` | `▕█████████████████████████░░░░░▏ 286/300 tokens` |
+| `budget_map(width=30, color=False)` | `◆●●●■■■■■■■■■■■■▪▪▪▪▪▪▪▪▪▪▪▪▪·` plus a legend with token counts |
+
+`str(result)` is `text`.
 
 ### `LogEntry`
 

@@ -73,8 +73,9 @@ where a small budget forces drops and retrieval pulls an already-dropped
 fact back in:
 
 ```text
-context: 102/120 tokens, 5 messages
------------------------------------
+context ▕██████████████████████████░░░░▏ 102/120 tokens, 5 messages
+budget  ◆◆◆◆■■■■■■■■▪▪▪▪▪▪▪▪▪▪▪▪▪▪····  ◆ core 15  ■ retrieved 31  ▪ recent 56  · free 18
+----------------------------------------------------------------
 core             core         15t [105 left]  included fixed core memory
 retrieved        archival     31t [0 left]  user message #3 (matched by keyword#1)
 skipped          archival      0t [0 left]  user message #7 (already in the recent window)
@@ -87,7 +88,13 @@ dropped          working      24t [18 left]  assistant message #4 (needs 24, 18 
 budget_exhausted working       0t [18 left]  3 older message(s) dropped to fit the budget
 ```
 
-Each line is a [`LogEntry`](api.md#logentry): what happened (`action`), which
+The first two lines read the budget at a glance: a gauge of how much of
+`max_tokens` is used, and a map with one cell per 1/30th of the budget,
+marked by what spent it (`◆` core persona, `●` known facts, `■` retrieved
+memories, `▲` summary, `▪` recent turns, `·` free). `result.usage()` gives the
+same split as a dict, and `explain(color=True)` colours both for a terminal.
+
+Each line after that is a [`LogEntry`](api.md#logentry): what happened (`action`), which
 tier, the tokens it cost, the budget left, and why. `result.log` gives you the
 same entries as objects.
 
