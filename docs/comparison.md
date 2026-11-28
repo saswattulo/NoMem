@@ -35,14 +35,33 @@ packed figure (79.0% and 86.3%).
    closed that gap (checked on 124 held-out questions: 55.6% to 76.1%).
 3. **Mem0 as normally used costs an LLM call per write.** NoMem never does.
 
-## Mem0's published scores
+## Mem0's published scores, and answer accuracy
 
 Mem0 reports 92.5 on LoCoMo and 94.4 on LongMemEval for its managed
-platform. Those are **QA accuracy**: an LLM answers from retrieved memories
-and another LLM judges the answer. They measure something different from
-the retrieval recall above and can't be placed in the same table. NoMem
-could only produce a number like that by adding an LLM to the evaluation,
-not to NoMem itself.
+platform, and its paper reports 66.88 on LoCoMo for the open algorithm
+(full-context reference: 72.90). Those are **QA accuracy (J)**: an LLM
+answers from retrieved memories and another LLM judges the answer. They
+measure something different from the retrieval recall above.
+
+`benchmarks/qa_bench.py` measures the same thing for NoMem, with Mem0's own
+answer and judge prompts and model (gpt-4o-mini), and runs Mem0 OSS, the
+whole conversation and no memory through the identical pipeline. The LLM
+sits only in the benchmark, never in NoMem. The J scores have not been run
+yet (they need an API key). The context stage has, and as an LLM-free
+signal it already shows NoMem's packed context holding the gold answer more
+often than Mem0's:
+
+| LoCoMo, 1,540 questions | Gold answer in context, 1,000 tokens | 2,000 tokens |
+| --- | --- | --- |
+| NoMem search, packed | **48.8%** | **55.2%** |
+| Mem0 OSS (`infer=False`), packed | 45.0% | 52.3% |
+| NoMem `build_context()` | 35.5% | 39.1% |
+| Whole conversation (~20k tokens) | 75.8% | |
+
+`build_context()` trails because it keeps the latest turns in the budget,
+which helps a live agent but rarely holds the answer to a LoCoMo question.
+Details, the published J table and the run commands are in
+[`MEM0_COMPARISON.md`](https://github.com/saswattulo/NoMem/blob/main/benchmarks/MEM0_COMPARISON.md#end-to-end-answer-accuracy-llm-judged-j).
 
 ## Reproduce
 
@@ -51,4 +70,7 @@ pip install -e ".[embed]" "mem0ai[nlp]" fastembed
 python -m spacy download en_core_web_sm
 python benchmarks/mem0_bench.py --system mem0  --embedder potion
 python benchmarks/mem0_bench.py --system nomem --embedder potion
+
+# answer accuracy (LLM in the benchmark only; needs OPENAI_API_KEY)
+python benchmarks/qa_bench.py --systems nomem,nomem-search,mem0,full,none
 ```

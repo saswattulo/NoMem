@@ -11,10 +11,12 @@ same metrics as `locomo_bench.py` and `longmemeval_bench.py`.
 | **Mem0's published scores** (vendor blog, Apr 2026, updated Sep 2026): LoCoMo **92.5**, LongMemEval **94.4**, BEAM-1M 64.1 | QA accuracy: an LLM answers from retrieved memories, another LLM judges the answer. Managed platform, which the blog says "includes proprietary optimizations not available in the open-source SDK". Judge/answer models not stated. Previous algorithm: 71.4 / 67.8. | Yes: extraction on every write, answering and judging at eval time |
 | **This harness** | Retrieval: did the evidence turn come back in the top k, and did it reach a 1,000-token context? | No |
 
-NoMem cannot produce a number like 92.5 without an LLM answering and judging
-(that LLM would sit in the eval, not in NoMem). So the honest comparison is
-the measured one below: both systems on the same retrieval questions. Mem0's
-published figures are reported as published, not reproduced.
+A number like 92.5 needs an LLM to answer and another to judge. That LLM
+sits in the evaluation, never in NoMem: `benchmarks/qa_bench.py` (section
+[End-to-end answer accuracy](#end-to-end-answer-accuracy-llm-judged-j) below)
+runs NoMem, Mem0 OSS and two reference contexts through Mem0's own LoCoMo
+answer and judge prompts. Until that has been run with an API key, the
+measured comparison is the retrieval one: both systems on the same questions.
 
 ## Measured: Mem0 with `infer=False` vs NoMem
 
@@ -82,6 +84,108 @@ turn R@5 (0.3: 55.6). Mem0 was not run on the held-out set.
    recall** on these benchmarks (63.4 vs 79.0 on LoCoMo; 75.7 vs 86.3 on LongMemEval)
    because it keeps recent turns in the budget. That is by design for a live
    agent, but it matters when quoting numbers next to Mem0's packed results.
+
+## End-to-end answer accuracy (LLM-judged J)
+
+`benchmarks/qa_bench.py` scores LoCoMo the way Mem0 does: an LLM answers each
+of the 1,540 category 1-4 questions from the context a system builds, and an
+LLM judge labels the answer CORRECT or WRONG. J is the share labelled
+CORRECT. NoMem still uses no LLM; the models sit only in the harness.
+
+What is held fixed, so the systems differ only in their context:
+
+| | Setting |
+| --- | --- |
+| Answer prompt | Mem0's `ANSWER_PROMPT` (from mem0's `evaluation/prompts.py`), verbatim, sent as the system message |
+| Judge prompt | Mem0's `ACCURACY_PROMPT` (from `evaluation/metrics/llm_judge.py`), verbatim, JSON mode |
+| Models | `gpt-4o-mini` answers and judges, temperature 0 (Mem0's paper setting); `--provider anthropic` uses `claude-haiku-5-5` |
+| Questions | All 1,540 LoCoMo questions in categories 1-4 (adversarial excluded, as in Mem0's paper) |
+| Context | 1,000 or 2,000 `ApproxCounter` tokens, every memory shown with its date |
+
+Contexts compared:
+
+| Name | Context |
+| --- | --- |
+| `nomem` | `NoMem.build_context(query=q)`, the real API: facts card, retrieved memories and the recent turns, in one budget |
+| `nomem-search` | `NoMem.search` results packed best-first into the budget |
+| `mem0` | Mem0 OSS 2.2.1, `infer=False`, its own hybrid search, packed the same way |
+| `full` | The whole conversation with session dates (~20k tokens): Mem0's "full-context" reference |
+| `none` | No memory: the floor |
+
+### Measured so far (no LLM yet)
+
+The answer and judge stage needs an `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`,
+which this environment did not have, so **no J score has been measured
+yet**. The context stage has been run for all five systems. As a rough,
+LLM-free signal, the table shows how often every word of the gold answer
+appears somewhere in the context. It undercounts temporal questions, whose
+gold answers are usually worked out from a date ("the day before 8 May"),
+and it is not a substitute for J.
+
+| Context (potion-base-8M) | Tokens | Gold answer in context | single-hop | multi-hop | temporal | open-domain | Retrieval p50 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `nomem-search`, 1,000 | 995 | **48.8%** | **65.6** | **26.6** | 35.8 | **9.4** | **8.5 ms** |
+| `mem0`, 1,000 | 995 | 45.0% | 59.6 | 23.8 | **36.4** | 8.3 | 39.7 ms |
+| `nomem` (`build_context`), 1,000 | 978 | 35.5% | 55.8 | 13.1 | 10.3 | 8.3 | 5.3 ms |
+| `nomem-search`, 2,000 | 1,991 | **55.2%** | **70.7** | **32.3** | 47.4 | **12.5** | |
+| `mem0`, 2,000 | 1,995 | 52.3% | 66.0 | 30.9 | 47.4 | 11.5 | 39.6 ms |
+| `nomem` (`build_context`), 2,000 | 1,979 | 39.1% | 61.5 | 14.9 | 10.9 | 8.3 | |
+| `full` | 20,059 | 75.8% | 87.8 | 63.8 | 71.7 | 19.8 | |
+| `none` | 0 | 0.5% | | | | | |
+
+Two things already show. Packed the same way, NoMem's context contains the
+answer more often than Mem0's at both budgets. And NoMem's own
+`build_context` is well behind its packed search on LoCoMo (35.5% vs 48.8%),
+most of all on temporal and multi-hop questions: it spends part of the
+budget on the latest turns, which rarely hold the answer to a question about
+months ago, and those recent turns carry no date. That is the same gap the
+retrieval tables show (63.4% vs 79.0% context recall), and the J run will
+show how much of it reaches the final answer.
+
+### Published LoCoMo J scores, for reference
+
+From Mem0's paper (arXiv 2504.19413, gpt-4o-mini answering, mean of 10
+runs). These were measured by Mem0, not here.
+
+| System | J | Tokens per query |
+| --- | --- | --- |
+| Full context | 72.90 | ~26,000 |
+| Mem0 with graph (Mem0g) | 68.44 | |
+| Mem0 | 66.88 | ~1,800 (memories) |
+| Zep | 65.99 | |
+| Best RAG (k=2, 256-token chunks) | 60.97 | |
+| LangMem | 58.10 | |
+| OpenAI memory | 52.90 | |
+| A-Mem | 48.38 | |
+
+Mem0 per category: single-hop 67.13, multi-hop 51.15, open-domain 72.93,
+temporal 55.51. Mem0's current headline, **92.5**, is its managed platform
+with a newer algorithm, and the answer and judge models are not stated, so
+it is not a like-for-like target. LoCoMo J also moves by several points with
+the answer prompt and the judge model alone, which is why this harness uses
+Mem0's prompts and model and runs the `full` and `none` references next to
+every system: a run should land `full` near 73 before its other numbers are
+compared with the paper.
+
+### Run it
+
+```bash
+pip install -e ".[embed]" openai                       # + "mem0ai[nlp]" fastembed for mem0
+python benchmarks/qa_bench.py --stage contexts \
+    --systems nomem,nomem-search,mem0,full,none         # no LLM, ~5 minutes
+OPENAI_API_KEY=... python benchmarks/qa_bench.py \
+    --systems nomem,nomem-search,mem0,full,none         # answer + judge
+OPENAI_API_KEY=... python benchmarks/qa_bench.py --budget 2000 --systems nomem,nomem-search,mem0
+python benchmarks/qa_bench.py --provider mock --convs 2 --limit 15   # offline smoke test
+```
+
+Contexts are saved to `benchmarks/results/` and every LLM reply is cached
+there (`qa_cache.jsonl`), so a re-run or an interrupted run only pays for
+calls not yet made. Cost estimate with gpt-4o-mini: the four memory systems
+at 1,000 tokens are about 1,540 x 4 x ~2.5k tokens ≈ 15M input tokens
+(≈ $2.50); `full` adds about 31M (≈ $5). Each row of the output
+(`qa_<provider>_<model>_<setup>_rows.jsonl`) keeps the context, answer and
+verdict, so any score can be checked question by question.
 
 ## Cost and latency
 
