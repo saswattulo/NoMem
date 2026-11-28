@@ -85,7 +85,7 @@ class NoMem:
         counter: Optional[TokenCounter] = None,
         retrieval_top_k: int = 5,
         archival_ratio: float = 0.3,
-        archival_max_ratio: float = 0.6,
+        archival_max_ratio: float = 0.8,
         retrieval: Optional[RetrievalConfig] = None,
         embedder=None,
         annotate: bool = True,

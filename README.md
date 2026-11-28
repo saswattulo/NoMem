@@ -137,7 +137,7 @@ memory (`matched by keyword#1, entity#1, slot#1`).
 | --- | --- | --- |
 | `retrieval_top_k` | 5 | Memories considered per query |
 | `archival_ratio` | 0.3 | Budget share reserved for retrieved memories (unused rolls over) |
-| `archival_max_ratio` | 0.6 | How far that share may stretch for a direct match that doesn't fit, taking tokens from the oldest recent turns; never past `max_tokens`. Set to `archival_ratio` for a fixed slice |
+| `archival_max_ratio` | 0.8 | How far that share may stretch for a direct match that doesn't fit, taking tokens from the oldest recent turns; never past `max_tokens`. Set to `archival_ratio` for a fixed slice |
 | `facts_ratio` | 0.1 | Most the Known-facts card may use (unused rolls over) |
 | `summary_ratio` | 0.0 | Budget share for the extractive summary (off by default) |
 | `retrieval` | `RetrievalConfig()` | Ranker weights, RRF k, importance and recency priors |
@@ -242,7 +242,7 @@ top 5 turns and the 1,000-token context?
 | LoCoMo context recall | 52.5% | 58.1% | 59.9% |
 | LongMemEval session recall@5 | | 89.9% | 92.1% |
 | LongMemEval turn recall@5 | | 52.7% | 55.9% |
-| LongMemEval context recall | | 47.7% | 51.1% |
+| LongMemEval context recall | | 50.0% | 53.2% |
 | Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
 | Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
 | Updated facts caught, fresh held-out (false flags) | | 19/25 (0/25) | 19/25 (0/25) |
