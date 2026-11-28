@@ -413,7 +413,11 @@ def detect(store, user_id: str, session_id: str, msg, speaker: str,
             cand = store.fts_ranked(user_id, session_id, " ".join(sorted(anc)), config.candidates)
             sims: dict[int, float] = {}
             if embedder is not None:
-                for i, s in embedder.similar(store, user_id, session_id, sent, config.candidates):
+                try:
+                    near = embedder.similar(store, user_id, session_id, sent, config.candidates)
+                except Exception:  # keyword candidates still work without the model
+                    near = []
+                for i, s in near:
                     sims[i] = s
                     if i not in cand:
                         cand.append(i)

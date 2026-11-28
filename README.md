@@ -134,10 +134,11 @@ one hard budget:
    asks about (`facts_ratio`, default 10% of the budget). Ask "what do I do
    for a living?" and it finds `job: backend engineer` with no shared keyword.
 2. **Retrieved memories**, each shown with its date. Several rankers propose
-   candidates and Reciprocal Rank Fusion merges them: FTS5 BM25 keywords,
+   candidates and score fusion merges them: FTS5 BM25 keywords,
    entities (ignoring ones that appear everywhere), dates in the question,
    slot facts, optional vectors, and the turns either side of a strong hit.
-   An importance prior re-orders the result and duplicates are collapsed.
+   An importance prior and a long-turn penalty re-order the result and
+   duplicates are collapsed.
    A memory that a later one contradicts carries a conflict marker quoting
    the other side with its date (see [Contradictions](#contradictions)).
 3. **Recent conversation**, newest first, as a contiguous window.
@@ -155,7 +156,7 @@ memory (`matched by keyword#1, entity#1, slot#1`).
 | `archival_max_ratio` | 0.8 | How far that share may stretch for a direct match that doesn't fit, taking tokens from the oldest recent turns; never past `max_tokens`. Set to `archival_ratio` for a fixed slice |
 | `facts_ratio` | 0.1 | Most the Known-facts card may use (unused rolls over) |
 | `summary_ratio` | 0.0 | Budget share for the extractive summary (off by default) |
-| `retrieval` | `RetrievalConfig()` | Ranker weights, RRF k, importance and recency priors |
+| `retrieval` | `RetrievalConfig()` | Fusion, ranker weights, importance, recency and length priors |
 | `annotate` | `True` | Rule-based annotation on write |
 | `embedder` | `None` | Optional vector ranker |
 
@@ -218,12 +219,11 @@ mem = NoMem(embedder=Model2VecEmbedder())  # minishlab/potion-base-8M by default
 
 `Model2VecEmbedder` is the recommended default: ~8M parameters, CPU-only,
 ~30 MB, fast enough to embed every message on write (~0.4 ms each). On
-LoCoMo it lifts search recall@5 from 56.8% to 58.6% and context recall from
-57.6% to 59.7%. The vector ranker is a light tie-breaker by default
-(`weights["vector"] = 0.15`): static embeddings are weaker than keyword
-matching on their own (41.7% recall@5 vector-only) and pull recall *down*
-at equal weight. `SentenceTransformerEmbedder` takes any sentence-transformers
-model (raise the vector weight for a stronger encoder); subclass `Embedder`
+LoCoMo it lifts search recall@5 from 59.6% to 62.3%, and on LongMemEval
+turn recall@5 from 72.0% to 77.7% (100-question spread). Its cosine is added
+to the keyword score at equal weight (`weights["vector"] = 1.0`).
+`SentenceTransformerEmbedder` takes any sentence-transformers
+model (63.9% LoCoMo recall@5 with bge-small); subclass `Embedder`
 for anything else. `HashingEmbedder` (character n-grams, no model) exists for
 offline use and tests.
 
@@ -284,18 +284,18 @@ search results, and in a 1,000-token context? LongMemEval (`longmemeval_s`,
 evidence session land in the top 5 sessions, and the evidence turn in the
 top 5 turns and the 1,000-token context?
 
-| | v0.1 (FTS5 only) | v0.2 (hybrid, LLM-free) | v0.2 + Model2Vec |
-| --- | --- | --- | --- |
-| LoCoMo search recall@5 | 50.9% | 56.8% | 58.6% |
-| LoCoMo context recall | 52.5% | 58.1% | 59.9% |
-| LongMemEval session recall@5 | | 89.9% | 92.1% |
-| LongMemEval turn recall@5 | | 52.7% | 55.9% |
-| LongMemEval context recall | | 50.0% | 53.2% |
-| Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms |
-| Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 |
-| Updated facts caught, fresh held-out (false flags) | | 19/25 (0/25) | 19/25 (0/25) |
-| Write throughput | | ~4,000 msg/s | ~1,500 msg/s |
-| Write cost | 0 model calls | 0 model calls | 1 embedding (no generative model) |
+| | v0.1 (FTS5 only) | v0.2 (hybrid, LLM-free) | v0.2 + Model2Vec | Score fusion, rules only | Score fusion + Model2Vec |
+| --- | --- | --- | --- | --- | --- |
+| LoCoMo search recall@5 | 50.9% | 56.8% | 58.6% | **59.6%** | **62.3%** |
+| LoCoMo context recall | 52.5% | 58.1% | 59.9% | 60.8% | 63.4% |
+| LongMemEval session recall@5 | | 89.9% | 92.1% | 89.7% | **93.3%** |
+| LongMemEval turn recall@5 | | 52.7% | 55.9% | **72.4%** | **78.5%** |
+| LongMemEval context recall | | 50.0% | 53.2% | 70.3% | 76.5% |
+| Query latency at 50k messages (p50) | 190 ms | 3-5 ms | 7-10 ms | 3 ms | 5-7 ms |
+| Planted facts recalled at 50k messages | 7/8 | 8/8 | 8/8 | 8/8 | 8/8 |
+| Updated facts caught, fresh held-out (false flags) | | 19/25 (0/25) | 19/25 (0/25) | 19/25 (0/25) | 19/25 (0/25) |
+| Write throughput | | ~4,000 msg/s | ~1,500 msg/s | ~3,000 msg/s | ~2,200 msg/s |
+| Write cost | 0 model calls | 0 model calls | 1 embedding (no generative model) | 0 model calls | 1 embedding |
 
 ## NoMem vs Mem0
 
@@ -304,10 +304,11 @@ own hybrid search, no LLM) against NoMem, same encoder:
 
 | | NoMem | Mem0 |
 | --- | --- | --- |
-| LoCoMo search recall@5 (potion-base-8M) | **58.6%** | 55.9% |
-| LongMemEval session recall@5 | **92.8%** | 92.2% |
-| LongMemEval turn recall@5 | 57.1% | **69.0%** |
-| Write / search latency, p50 | **0.6 / 6 ms** | 10 / 72 ms |
+| LoCoMo search recall@5 (potion-base-8M) | **62.3%** | 55.9% |
+| LoCoMo search recall@5 (bge-small) | **63.9%** | 59.1% |
+| LongMemEval session recall@5 | **92.5%** | 92.2% |
+| LongMemEval turn recall@5 | **77.7%** | 69.0% |
+| Write / search latency, p50 | **0.7 / 8 ms** | 10 / 72 ms |
 | LLM calls per write as normally used | **0** | 1 |
 
 Method, every table and why Mem0's published 92.5 / 94.4 are a different

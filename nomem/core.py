@@ -22,6 +22,7 @@ Example
 from __future__ import annotations
 
 import time
+import warnings
 from datetime import datetime
 from typing import Optional, Union
 
@@ -148,7 +149,11 @@ class NoMem:
             created_at=timestamp, commit=False,
         )
         if self.embedder is not None:
-            self.embedder.index(self.store, msg, self.user_id, self.session_id)
+            try:
+                self.embedder.index(self.store, msg, self.user_id, self.session_id)
+            except Exception as e:  # the message must not be lost to a failing model
+                warnings.warn(f"embedder failed, message {msg.id} is stored without a vector "
+                              f"(keyword search still finds it): {e!r}", RuntimeWarning, stacklevel=2)
         if self.annotate:
             speaker = (metadata or {}).get("speaker") or A.speaker_of(content)
             ann = A.annotate(content, msg.created_at, subject=speaker or "user")
@@ -683,7 +688,8 @@ class NoMem:
     def _drop_vector_cache(self) -> None:
         cache = getattr(self.embedder, "_mats", None)
         if isinstance(cache, dict):
-            for key in [k for k in cache if k[0] == id(self.store) and k[1] == self.user_id]:
+            tok = getattr(self.store, "_nomem_vec_token", None)  # see Embedder._key
+            for key in [k for k in cache if k[0] == tok and k[1] == self.user_id]:
                 cache.pop(key, None)
 
     # -- introspection ---------------------------------------------------

@@ -196,3 +196,84 @@ Stress, invariants and the updated-facts benchmark are unchanged. Context
 recall is still well below turn R@10 (50.0 vs 74.5): `retrieval_top_k=5` still
 caps how many matches are considered. At 0.8 a long match can leave only 20%
 of the budget for recent conversation; set `archival_max_ratio=0.6` to keep more.
+
+## Score fusion (step 12)
+
+PR #8 found that LongMemEval's turn-level gap to Mem0 came from fusion:
+rank-only RRF let long turns that repeat a query word outvote a short turn
+that is semantically right. Step 12 replaces it with score fusion and adds a
+long-turn penalty. Tuned on LoCoMo plus the usual 100-question LongMemEval
+spread, then checked once on a **held-out** set of 124 LongMemEval questions
+(every third answerable question not in the 100).
+
+Search R@5, Model2Vec potion-base-8M unless marked:
+
+| Step | LoCoMo R@5 | LME turn R@5 | LME session R@5 |
+| --- | --- | --- | --- |
+| 12a. Before (RRF, vector 0.15, context 0.2) | 58.6 | 57.1 | 92.8 |
+| 12b. Score fusion: BM25 / best BM25 + raw cosine, vector 1.0 | 59.7 | 67.2 | 92.8 |
+| 12c. + BM25 share squared | 60.7 | 69.4 | 92.5 |
+| 12d. + context lift only for same-role neighbours | 60.7 | 70.6 | 92.5 |
+| 12e. + long-turn penalty `(400/len)**0.3` | 60.7 | 77.7 | 92.5 |
+| 12f. Ablation: penalty 0.5 (single-session-assistant 81.8 -> 72.7) | 60.7 | 78.3 | 92.9 |
+| 12g. Ablation: penalty with pivot 800 chars | 60.7 | 73.7 | 91.9 |
+| 12h. Ablation: cosine min-max normalised instead of raw | 57.4 | 79.2 | 95.3 |
+| 12i. Ablation: vector weight 1.5 (held-out 76.5 vs 76.1: not adopted) | 61.4 | 79.8 | 94.1 |
+| 12j. Ablation: no context lift | 56.4 | 69.6 | 92.8 |
+| 12. + context weight 0.2 -> 0.35 (**new defaults**) | **62.3** | **77.7** | 92.5 |
+| 12. Same, keyword rules only (no embedder) | 59.6 | 72.0 | 88.2 |
+
+Held-out 124 LongMemEval questions (never used for tuning), turn R@5:
+
+| | Before | Step 12 |
+| --- | --- | --- |
+| + Model2Vec | 55.6 | **76.1** |
+| Keyword only | 52.1 | **71.4** |
+| Step 12 without the long-turn penalty | | 71.0 |
+
+Full `run_all.py` at the new defaults:
+
+| Benchmark | Keyword only: before -> after | + Model2Vec: before -> after |
+| --- | --- | --- |
+| LoCoMo R@5 | 56.8 -> **59.6** | 58.6 -> **62.3** |
+| LoCoMo R@10 | 64.0 -> 67.8 | 66.0 -> 70.3 |
+| LoCoMo context recall | 58.1 -> 60.8 | 59.9 -> 63.4 |
+| LongMemEval turn R@5 | 55.2 -> **72.0** | 57.1 -> **77.7** |
+| LongMemEval turn R@10 | 74.6 -> 79.0 | 75.6 -> 85.7 |
+| LongMemEval session R@5 | 89.1 -> 88.2 | 92.8 -> 92.5 |
+| LongMemEval context recall | 54.4 -> 70.6 | 55.8 -> 75.7 |
+| single-session-user turn R@5 | 85.7 -> 82.1 | 78.6 -> 82.1 |
+| single-session-assistant | 63.6 -> 81.8 | 63.6 -> 81.8 |
+| single-session-preference | 41.7 -> 50.0 | 41.7 -> 66.7 |
+| multi-session | 40.5 -> 53.1 | 42.8 -> 63.5 |
+| knowledge-update | 59.4 -> 87.5 | 59.4 -> 90.6 |
+| temporal-reasoning | 50.6 -> 76.5 | 59.3 -> 82.1 |
+| search p50 (LME) | 6.8 -> 6.7 ms | 11.4 -> 11.0 ms |
+
+All 470 LongMemEval questions (`--longmemeval-limit 0`), before (step 11)
+-> after:
+
+| | Keyword only | + Model2Vec |
+| --- | --- | --- |
+| Turn R@5 | 52.7 -> **72.4** | 55.9 -> **78.5** |
+| Session R@5 | 89.9 -> 89.7 | 92.1 -> **93.3** |
+| Context recall | 50.0 -> **70.3** | 53.2 -> **76.5** |
+| single-session-user turn R@5 | 91.4 | 94.5 |
+| single-session-assistant | 83.9 | 82.1 |
+| single-session-preference | 44.4 | 51.1 |
+| multi-session | 58.3 | 69.2 |
+| knowledge-update | 86.6 | 91.7 |
+| temporal-reasoning | 69.8 | 76.6 |
+| search p50 / p95 | 5.3 / 7.2 ms | 9.0 / 15.5 ms |
+
+Stress (planted 8/8 at every scale), 500/500 invariants and the
+updated-facts benchmark are unchanged. Session R@5 dips slightly (0.3-0.9);
+LoCoMo multi-hop keyword-only dips 27.3 -> 26.7. `RetrievalConfig.legacy()`
+restores the old ranking.
+
+Hardening in the same step (tests in `tests/test_retrieval_robust.py`): the
+slot ranker no longer returns messages from another session of the same
+user; a failing embedder no longer loses the message or fails search; vectors
+of another size are skipped with a warning; NaN vectors are neutralised; the
+vector cache no longer keys on `id(store)` (reused after garbage collection);
+queries keep their 64 longest distinct words; `RetrievalConfig` is validated.

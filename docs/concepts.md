@@ -86,8 +86,8 @@ facts card.
 
 ## Retrieval
 
-Several rankers each propose candidates, and Reciprocal Rank Fusion merges
-them:
+Several rankers each propose candidates, and their scores are fused:
+keyword and vector add their own scores, the others add a rank-based bonus:
 
 | Ranker | Finds | Weight |
 | --- | --- | --- |
@@ -95,10 +95,10 @@ them:
 | `entity` | Messages sharing a named entity with the query (entities that appear everywhere are ignored) | 0.5 |
 | `time` | Messages about a date the query mentions ("what did I do last May?") | 0.5 |
 | `slot` | Messages that set a fact the query asks about ("what do I do for work?" finds `job`) | 0.5 |
-| `vector` | Nearest neighbours by embedding, if an embedder is set | 0.15 |
-| `context` | The turns either side of a strong hit | 0.2 |
+| `vector` | Nearest neighbours by embedding, if an embedder is set | 1.0 |
+| `context` | The turns either side of a strong hit, said in the same role | 0.35 |
 
-An importance prior re-orders the fused list, near-duplicates are collapsed,
+An importance prior and a long-turn penalty re-order the fused list, near-duplicates are collapsed,
 and `search_hits()` tells you which rankers found each result
 (`matched by keyword#1, entity#1, slot#1`). See
 [Retrieval and vectors](retrieval.md).
