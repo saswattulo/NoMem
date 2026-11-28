@@ -59,6 +59,27 @@ def sentences(text: str) -> list[str]:
     return [s for s in _SENT_SPLIT.split(text.strip()) if s]
 
 
+# A question about what the assistant itself said earlier ("the restaurant you
+# recommended", "in our last chat ..."): its answer sits in an assistant turn,
+# not in the user's question that prompted it. Past tense only, so a request
+# ("can you suggest ...") doesn't count, and "remind me" or "we talked about"
+# alone don't either: "remind me what my sister's name is" asks for the user's
+# own words.
+_ASKS_ASSISTANT = re.compile(
+    r"\byou(?:'ve| have| had)?\s+(?:\w+\s+)?(?:recommended|suggested|mentioned|said|told|gave|"
+    r"provided|listed|shared|described|explained|wrote|offered|proposed|named|included|"
+    r"came up with|pointed out|showed|made|created)\b"
+    r"|\b(?:did|didn't) you\s+(?:\w+\s+)?(?:recommend|suggest|mention|say|tell|give|provide|list|share|"
+    r"describe|explain|write|offer|propose|name|include|come up with|point out|show|make|create)\b"
+    r"|\b(?:our|the|that)\s+(?:previous|last|earlier|past)\s+(?:conversation|chat|discussion|exchange)\b",
+    re.I)
+
+
+def asks_about_assistant(query: str) -> bool:
+    """Does ``query`` ask about something the assistant said earlier?"""
+    return bool(_ASKS_ASSISTANT.search(query))
+
+
 # ---------------------------------------------------------------------------
 # Entities
 

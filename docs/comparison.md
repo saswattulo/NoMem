@@ -21,18 +21,21 @@ given the same embedding model in each row.
 Context recall is measured by packing each system's search results,
 best-first, into 1,000 tokens. NoMem's own `build_context()` also keeps
 recent turns in the budget, which is what a live agent wants, so it scores
-lower on these benchmarks (63.4% on LoCoMo, 75.7% on LongMemEval) than the
-packed figure (79.0% and 86.3%).
+lower on these benchmarks (63.4% on LoCoMo, 77.7% on LongMemEval) than the
+packed figure (79.0% and 85.3%).
 
 ## What the numbers say
 
 1. **On LoCoMo, NoMem matches or beats Mem0's retrieval** with the same
    encoder, and writes and searches 10 to 20 times faster.
-2. **On LongMemEval NoMem now also ranks individual turns better**: 77.7%
+2. **On LongMemEval NoMem now also ranks individual turns better**: 78.7%
    vs 69.0% turn recall@5, sessions a tie. NoMem 0.3 was at 57.1%; its
    rank-based fusion let a long, wordy turn that repeats a query word beat a
    turn that is right in meaning. Score fusion plus a mild long-turn penalty
    closed that gap (checked on 124 held-out questions: 55.6% to 76.1%).
+   On questions whose answer is in an assistant reply, where Mem0 had led,
+   NoMem now leads on all 56 (89.3% vs 85.7%): a query cue spots questions
+   about what the assistant said and favours its turns.
 3. **Mem0 as normally used costs an LLM call per write.** NoMem never does.
 
 ## Mem0's published scores

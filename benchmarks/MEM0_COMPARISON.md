@@ -51,18 +51,27 @@ running on the same 4 CPUs, so NoMem latencies here are pessimistic.
 | System | Session R@5 | all@5 | Turn R@5 | Turn R@10 | Context recall | add p50 / p95 | search p50 / p95 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | NoMem, keyword rules only | 88.2 | 80.0 | 72.0 | 79.0 | 79.4 | 6 / 81 ms* | 14 / 48 ms* |
-| NoMem + potion-base-8M | **92.5** | **87.0** | **77.7** | **85.7** | **86.3** | 2.5 / 48 ms | 11 / 29 ms |
+| NoMem + potion-base-8M | **92.5** | **87.0** | **78.7** | **85.7** | **85.3** | 2.4 / 47 ms | 11 / 18 ms |
 | Mem0 + potion-base-8M | 92.2 | 86.0 | 69.0 | 79.2 | 76.5 | 13 / 55 ms | 66 / 219 ms |
 | NoMem 0.3 (rank fusion) + potion, for reference | 92.8 | 87.0 | 57.1 | 75.6 | 69.1 | 3.1 / 55 ms | 13 / 35 ms |
-| NoMem `build_context` (+ potion) | | | | | 75.7 | | |
+| NoMem `build_context` (+ potion) | | | | | 77.7 | | |
 
 Turn R@5 by question type (NoMem + potion vs Mem0 + potion): single-session
-user 82.1 vs 78.6, single-session assistant 81.8 vs 90.9, preference 66.7 vs
+user 82.1 vs 78.6, single-session assistant 90.9 vs 90.9, preference 66.7 vs
 41.7, multi-session 63.5 vs 51.3, knowledge update 90.6 vs 81.2, temporal
 82.1 vs 71.0. The 100-question spread has 6-27 questions per type, so
 per-type gaps are noisy. The fusion settings were tuned on these 100
 questions; on 124 held-out LongMemEval questions NoMem + potion gets 76.1
 turn R@5 (0.3: 55.6). Mem0 was not run on the held-out set.
+
+Single-session-assistant questions (answer inside an assistant reply), all
+56 of them, same harness and packing (step 13 in `TRAJECTORY.md`):
+
+| System | Turn R@5 | Turn R@10 | Context recall |
+| --- | --- | --- | --- |
+| NoMem + potion, before the assistant cue | 82.1 | 91.1 | |
+| NoMem + potion | **89.3** | **94.6** | **85.7** |
+| Mem0 + potion | 85.7 | 91.1 | 78.6 |
 
 ### What the numbers say
 
@@ -75,11 +84,12 @@ turn R@5 (0.3: 55.6). Mem0 was not run on the held-out set.
    rank-based RRF let a long, wordy turn that repeats a query word beat a
    turn that is semantically right. Score fusion (BM25 relative to the
    best hit, squared, plus raw cosine) and a mild long-turn penalty fixed
-   it. Mem0 still leads on single-session-assistant questions (90.9 vs
-   81.8), where the evidence sits in long assistant answers that the
-   length penalty discounts.
+   it. Single-session-assistant questions, where Mem0 led (90.9 vs 81.8 on
+   the spread), are now level on the spread and ahead on all 56 (89.3 vs
+   85.7): a query cue spots questions about what the assistant said and
+   favours assistant turns.
 3. **NoMem's own `build_context` gives up about 11-16 points of context
-   recall** on these benchmarks (63.4 vs 79.0 on LoCoMo; 75.7 vs 86.3 on LongMemEval)
+   recall** on these benchmarks (63.4 vs 79.0 on LoCoMo; 77.7 vs 85.3 on LongMemEval)
    because it keeps recent turns in the budget. That is by design for a live
    agent, but it matters when quoting numbers next to Mem0's packed results.
 

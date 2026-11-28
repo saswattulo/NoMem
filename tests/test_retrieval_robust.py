@@ -151,3 +151,51 @@ def test_forget_drops_cached_vectors():
     m.forget([gone.id])
     assert gone.id not in [h.id for h in m.search("locker code", 5)]
     assert gone.id not in [i for i, _ in m.embedder.similar(m.store, m.user_id, m.session_id, "locker code", 5)]
+
+
+@pytest.mark.parametrize("q", [
+    "What was the name of the hotel you recommended in Lisbon?",
+    "You mentioned a book about habits, which one was it?",
+    "In our previous conversation, what did the list's third item say?",
+    "Which ratio have you suggested for the dilution?",
+    "I'm going back to our last chat about chess. What was your move?",
+])
+def test_assistant_cue_fires_on_questions_about_the_assistants_words(q):
+    from nomem.annotate import asks_about_assistant
+    assert asks_about_assistant(q)
+
+
+@pytest.mark.parametrize("q", [
+    "Can you suggest a good hotel in Lisbon?",
+    "Remind me what my sister's name is.",
+    "What did I say about my new job?",
+    "We talked about my trip, where am I staying?",
+    "When did Caroline go to the LGBTQ support group?",
+    "What do you recommend for dinner tonight?",
+])
+def test_assistant_cue_does_not_fire_on_requests_or_user_facts(q):
+    from nomem.annotate import asks_about_assistant
+    assert not asks_about_assistant(q)
+
+
+def test_assistant_cue_lifts_the_reply_to_a_matching_question():
+    mem = NoMem(counter=ApproxCounter())
+    mem.add("user", "Can you recommend a romantic restaurant in Rome for dinner?")
+    reply = mem.add("assistant", "For a romantic evening I'd book Roscioli, near Campo de' Fiori. "
+                    "It's cosy, the carbonara is famous and the wine list is long. " * 3)
+    mem.add("user", "My sister lives in Rome and loves dinner parties.")
+    mem.add("user", "We had a lovely dinner at a restaurant last week, very romantic.")
+    mem.add("user", "Rome in May is my favourite trip so far.")
+    q = "Which romantic restaurant in Rome did you recommend for dinner?"
+
+    def rank(cfg):
+        m = NoMem(counter=ApproxCounter(), db=mem.store, retrieval=cfg)
+        return [h.id for h in m.search(q, 10)].index(reply.id)
+
+    assert rank(RetrievalConfig()) <= 1
+    assert rank(RetrievalConfig(assistant_cue_boost=1.0)) > rank(RetrievalConfig())
+
+
+def test_assistant_cue_boost_must_be_positive():
+    with pytest.raises(ValueError):
+        RetrievalConfig(assistant_cue_boost=0)

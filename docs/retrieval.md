@@ -33,7 +33,7 @@ each ranker gives a candidate (`fusion="score"`, the default):
 Rank-only fusion (`fusion="rrf"`, NoMem 0.3's default) treats the keyword #1
 and #20 as nearly equal and let long turns that repeat a query word outvote a
 short turn that is semantically right; score fusion took LongMemEval turn
-recall@5 from 57.1% to 77.7% with Model2Vec (see [Benchmarks](benchmarks.md)).
+recall@5 from 57.1% to 78.7% with Model2Vec (see [Benchmarks](benchmarks.md)).
 
 Then:
 
@@ -46,6 +46,15 @@ Then:
 - a **long-turn penalty** scales hits over 400 characters by
   `(400 / length) ** 0.3`: a pasted document or a 3,000-character answer
   matches many query words by size alone;
+- an **assistant cue**: when the question asks about something the assistant
+  said ("the restaurant you recommended", "in our previous conversation"),
+  assistant turns' scores are multiplied by 1.6 (`assistant_cue_boost`), and
+  the reply next to a matching user turn gets the context lift even though
+  its role differs. Such answers sit in the assistant's reply, often a long
+  one, while the user's question shares more of the query's words. The cue
+  is a regex on past-tense verbs after "you" and on "our last/previous
+  conversation"; "remind me" or "we talked about" alone don't fire it, since
+  they also ask for the user's own facts;
 - **near-duplicates** (SimHash within 3 bits) are collapsed to one;
 - the **context** ranker adds the turns either side of the top 5 hits, so an
   answer that spans two turns comes in whole. Only neighbours said in the
@@ -90,7 +99,7 @@ every message on write (about 0.4 ms each). It downloads once from the
 Hugging Face Hub; pass a local path to run fully offline.
 
 On LoCoMo it lifts search recall@5 from 59.6% to 62.3%, and on LongMemEval
-(100-question spread) turn recall@5 from 72.0% to 77.7%.
+(100-question spread) turn recall@5 from 72.0% to 78.7%.
 
 Its cosine is added to the keyword score at weight 1.0. Under the old
 rank-only fusion it had to stay a light tie-breaker (0.15), because a
